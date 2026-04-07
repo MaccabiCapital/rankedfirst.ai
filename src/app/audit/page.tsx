@@ -220,11 +220,11 @@ export default function AuditPage() {
   const [activeDimension, setActiveDimension] = useState<string | null>(null);
   const resultsRef = useRef<HTMLDivElement>(null);
 
-  // Switch loading phase message after 8 seconds
+  // Switch loading phase message after 20 seconds
   useEffect(() => {
     if (!loading) return;
     setLoadingPhase("collecting");
-    const timer = setTimeout(() => setLoadingPhase("analyzing"), 8000);
+    const timer = setTimeout(() => setLoadingPhase("analyzing"), 20000);
     return () => clearTimeout(timer);
   }, [loading]);
 

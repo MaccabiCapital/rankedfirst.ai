@@ -22,7 +22,7 @@ function getDFSAuth(): string {
   return "Basic " + Buffer.from(`${login}:${password}`).toString("base64");
 }
 
-async function callDFS(path: string, body: unknown[], timeoutMs = 7000): Promise<any> {
+async function callDFS(path: string, body: unknown[], timeoutMs = 15000): Promise<any> {
   const res = await fetch(`${DFS_BASE}${path}`, {
     method: "POST",
     headers: { Authorization: getDFSAuth(), "Content-Type": "application/json" },
@@ -41,7 +41,7 @@ async function callDFS(path: string, body: unknown[], timeoutMs = 7000): Promise
   return json;
 }
 
-async function safeDFS(path: string, body: unknown[], timeoutMs = 7000): Promise<any> {
+async function safeDFS(path: string, body: unknown[], timeoutMs = 15000): Promise<any> {
   try {
     return await callDFS(path, body, timeoutMs);
   } catch (e) {
@@ -829,7 +829,7 @@ export async function POST(request: NextRequest) {
     const kw = keyword || business_name;
     const city = location.split(",")[0]?.trim() ?? location;
 
-    console.log(`[audit] Starting audit for "${business_name}" in "${location}" (keyword: "${kw}")`);
+    console.log(`[audit] Collecting data for "${business_name}" in "${location}" (keyword: "${kw}")`);
 
     // ─── Step 1: Resolve location ───────────────────────────────────
     const loc = resolveLocation(location);
@@ -964,9 +964,9 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    console.log("[audit] Phase 1 data collection complete. Starting Phase 2 (Claude analysis)...");
+    console.log("[audit] Data collection complete. Running Claude analysis...");
 
-    // ─── Phase 2: Claude Analysis ───────────────────────────────────
+    // ─── Claude Analysis ───────────────────────────────────────────
     const systemPrompt = buildSystemPrompt();
     const userMessage = buildUserMessage(
       body,
