@@ -4,6 +4,7 @@ import * as React from "react";
 import Link from "next/link";
 import { navigation } from "@/lib/site-data";
 import { Button } from "@/components/ui/Button";
+import AuthButton from "@/components/layout/AuthButton";
 
 // ---- Icons ----
 function ChevronDown({ className = "" }: { className?: string }) {
@@ -266,9 +267,7 @@ export function Header() {
           {/* Desktop Right */}
           <div className="hidden lg:flex items-center gap-2">
             <ThemeToggle />
-            <Button href="/about" variant="ghost" size="sm">
-              Contact
-            </Button>
+            <AuthButton />
             <Button href="#contact" variant="primary" size="sm">
               Get Started
             </Button>
@@ -342,6 +341,7 @@ export function Header() {
               </div>
             ))}
             <div className="pt-3 mt-3 border-t border-navy-800 flex flex-col gap-2">
+              <AuthButton />
               <Button href="#contact" variant="primary" size="md" className="w-full justify-center">
                 Get Started
               </Button>
