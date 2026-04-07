@@ -49,6 +49,36 @@ interface RankedKeywordsSummary {
   topKeywords: RankedKeyword[];
 }
 
+interface GeoGridResult {
+  lat: number;
+  lng: number;
+  rank: number;
+  found: boolean;
+  topCompetitor: string;
+}
+
+interface GeoGridData {
+  solv: number;
+  avgRank: number;
+  gridResults: GeoGridResult[];
+  topCompetitors: Array<{ name: string; appearances: number }>;
+}
+
+interface ReviewItem {
+  rating: number;
+  text: string;
+  time: string;
+  hasReply: boolean;
+}
+
+interface ReviewsData {
+  totalReviews: number;
+  avgRating: number;
+  replyRate: number;
+  recentVelocity: number;
+  topReviews: ReviewItem[];
+}
+
 interface AuditResult {
   status: string;
   business: {
@@ -71,6 +101,8 @@ interface AuditResult {
   rawProfile: Record<string, unknown> | null;
   competitors: Array<Record<string, unknown>>;
   rankedKeywords: RankedKeywordsSummary | null;
+  geoGrid: GeoGridData | null;
+  reviewsData: ReviewsData | null;
   creditsUsed?: number;
   creditsRemaining?: number | null;
 }
@@ -150,6 +182,100 @@ const dimensionIcons: Record<string, React.ReactNode> = {
     </svg>
   ),
 };
+
+// ─── Geo-Grid Heatmap ───────────────────────────────────────────────
+function GeoGridHeatmap({ data }: { data: GeoGridData }) {
+  const solvPct = Math.round(data.solv * 100);
+
+  function cellColor(r: GeoGridResult) {
+    if (!r.found) return "bg-red-500/20 border-red-500/30";
+    if (r.rank <= 3) return "bg-emerald-500/20 border-emerald-500/30";
+    return "bg-amber-500/20 border-amber-500/30";
+  }
+
+  function cellTextColor(r: GeoGridResult) {
+    if (!r.found) return "text-red-400";
+    if (r.rank <= 3) return "text-emerald-400";
+    return "text-amber-400";
+  }
+
+  return (
+    <div className="mt-4 p-4 bg-navy-950/60 rounded-lg border border-navy-800/40">
+      <p className="text-xs font-mono text-navy-400 uppercase tracking-wider mb-3">3×3 Geo-Grid</p>
+      <div className="grid grid-cols-3 gap-2 w-fit mx-auto mb-3">
+        {data.gridResults.map((r, i) => (
+          <div
+            key={i}
+            className={`w-12 h-12 rounded-lg border flex items-center justify-center ${cellColor(r)}`}
+            title={r.found ? `Rank #${r.rank}` : `Not found — top: ${r.topCompetitor || "N/A"}`}
+          >
+            <span className={`font-mono font-bold text-sm ${cellTextColor(r)}`}>
+              {r.found ? `#${r.rank}` : "—"}
+            </span>
+          </div>
+        ))}
+      </div>
+      <div className="text-center space-y-1">
+        <p className="text-xs font-mono text-navy-300">
+          Share of Local Voice: <span className={solvPct >= 50 ? "text-emerald-400" : solvPct >= 20 ? "text-amber-400" : "text-red-400"}>{solvPct}%</span>
+          {data.avgRank > 0 && <> · Avg rank: <span className="text-white">#{data.avgRank.toFixed(1)}</span></>}
+        </p>
+        {data.topCompetitors.length > 0 && (
+          <p className="text-[10px] font-mono text-navy-500">
+            Top competitors: {data.topCompetitors.slice(0, 3).map((c) => `${c.name} (${c.appearances}/9)`).join(", ")}
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Reviews Summary ────────────────────────────────────────────────
+function ReviewsSummary({ data }: { data: ReviewsData }) {
+  const stars = (n: number) => "★".repeat(Math.round(n)) + "☆".repeat(5 - Math.round(n));
+
+  return (
+    <div className="mt-4 p-4 bg-navy-950/60 rounded-lg border border-navy-800/40">
+      <p className="text-xs font-mono text-navy-400 uppercase tracking-wider mb-3">Google Reviews</p>
+      <div className="grid grid-cols-3 gap-3 mb-4">
+        <div>
+          <p className="text-lg font-display font-bold text-white">{data.avgRating.toFixed(1)}</p>
+          <p className="text-[10px] font-mono text-navy-500">{data.totalReviews} reviews</p>
+        </div>
+        <div>
+          <p className="text-lg font-display font-bold text-white">{Math.round(data.replyRate * 100)}%</p>
+          <p className="text-[10px] font-mono text-navy-500">reply rate</p>
+          <div className="w-full h-1 bg-navy-800 rounded-full mt-1 overflow-hidden">
+            <div
+              className={`h-full rounded-full ${data.replyRate >= 0.8 ? "bg-emerald-500" : data.replyRate >= 0.5 ? "bg-amber-500" : "bg-red-500"}`}
+              style={{ width: `${Math.round(data.replyRate * 100)}%` }}
+            />
+          </div>
+        </div>
+        <div>
+          <p className="text-lg font-display font-bold text-white">{data.recentVelocity.toFixed(1)}</p>
+          <p className="text-[10px] font-mono text-navy-500">reviews/mo</p>
+        </div>
+      </div>
+      {data.topReviews.length > 0 && (
+        <div className="space-y-2">
+          {data.topReviews.slice(0, 3).map((rev, i) => (
+            <div key={i} className="p-2.5 bg-navy-900/60 rounded-lg border border-navy-800/30">
+              <div className="flex items-center gap-2 mb-1">
+                <span className="text-amber-400 text-xs">{stars(rev.rating)}</span>
+                <span className="text-[10px] font-mono text-navy-600">{rev.time}</span>
+                {rev.hasReply && (
+                  <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400">replied</span>
+                )}
+              </div>
+              <p className="text-xs text-navy-300 line-clamp-2">{rev.text || "No review text"}</p>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 // ─── Score Ring SVG ──────────────────────────────────────────────────
 function ScoreRing({ score, size = 160 }: { score: number; size?: number }) {
@@ -440,40 +566,50 @@ export default function AuditPage() {
                 {result.scorecard.dimensions.map((dim) => (
                   <div
                     key={dim.label}
-                    className="bg-navy-900 border border-navy-800 rounded-xl p-5 flex items-center gap-5"
+                    className="bg-navy-900 border border-navy-800 rounded-xl p-5"
                   >
-                    <div className={`shrink-0 p-2.5 rounded-lg ${scoreBg(dim.score)}`}>
-                      <span className={scoreColor(dim.score)}>
-                        {dimensionIcons[dim.icon] || dimensionIcons.health}
-                      </span>
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between mb-1.5">
-                        <h3 className="font-display font-semibold text-white text-sm">
-                          {dim.label}
-                        </h3>
-                        <div className="flex items-center gap-3">
-                          <span className="text-xs font-mono text-navy-500">
-                            {Math.round(dim.weight * 100)}% weight
-                          </span>
-                          <span className={`font-display font-bold text-lg ${scoreColor(dim.score)}`}>
-                            {dim.score}
-                          </span>
+                    <div className="flex items-center gap-5">
+                      <div className={`shrink-0 p-2.5 rounded-lg ${scoreBg(dim.score)}`}>
+                        <span className={scoreColor(dim.score)}>
+                          {dimensionIcons[dim.icon] || dimensionIcons.health}
+                        </span>
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between mb-1.5">
+                          <h3 className="font-display font-semibold text-white text-sm">
+                            {dim.label}
+                          </h3>
+                          <div className="flex items-center gap-3">
+                            <span className="text-xs font-mono text-navy-500">
+                              {Math.round(dim.weight * 100)}% weight
+                            </span>
+                            <span className={`font-display font-bold text-lg ${scoreColor(dim.score)}`}>
+                              {dim.score}
+                            </span>
+                          </div>
                         </div>
+                        <div className="w-full h-1.5 bg-navy-800 rounded-full overflow-hidden mb-2">
+                          <div
+                            className={`h-full rounded-full transition-all duration-1000 ease-out ${scoreBarColor(dim.score)}`}
+                            style={{ width: `${dim.score}%` }}
+                          />
+                        </div>
+                        <p className="text-xs text-navy-400 font-mono">
+                          {dim.detail.startsWith("Estimated") && (
+                            <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-navy-800 text-navy-500 text-[9px] uppercase tracking-wider font-bold mr-1.5">Est</span>
+                          )}
+                          {dim.detail}
+                        </p>
                       </div>
-                      <div className="w-full h-1.5 bg-navy-800 rounded-full overflow-hidden mb-2">
-                        <div
-                          className={`h-full rounded-full transition-all duration-1000 ease-out ${scoreBarColor(dim.score)}`}
-                          style={{ width: `${dim.score}%` }}
-                        />
-                      </div>
-                      <p className="text-xs text-navy-400 font-mono">
-                        {dim.detail.startsWith("Estimated") && (
-                          <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-navy-800 text-navy-500 text-[9px] uppercase tracking-wider font-bold mr-1.5">Est</span>
-                        )}
-                        {dim.detail}
-                      </p>
                     </div>
+                    {/* Geo-Grid Heatmap under Local Pack Ranking */}
+                    {dim.icon === "ranking" && result.geoGrid && (
+                      <GeoGridHeatmap data={result.geoGrid} />
+                    )}
+                    {/* Reviews Summary under Reviews & Reputation */}
+                    {dim.icon === "reviews" && result.reviewsData && (
+                      <ReviewsSummary data={result.reviewsData} />
+                    )}
                   </div>
                 ))}
 

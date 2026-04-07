@@ -20,7 +20,7 @@ function getDFSAuth(): string {
   return "Basic " + Buffer.from(`${login}:${password}`).toString("base64");
 }
 
-async function callDFS(path: string, body: unknown[]): Promise<any> {
+async function callDFS(path: string, body: unknown[], timeoutMs = 30000): Promise<any> {
   const res = await fetch(`${DFS_BASE}${path}`, {
     method: "POST",
     headers: {
@@ -28,7 +28,7 @@ async function callDFS(path: string, body: unknown[]): Promise<any> {
       "Content-Type": "application/json",
     },
     body: JSON.stringify(body),
-    signal: AbortSignal.timeout(30000),
+    signal: AbortSignal.timeout(timeoutMs),
   });
   const json = await res.json();
   if (json.status_code !== 20000) {
@@ -43,9 +43,9 @@ async function callDFS(path: string, body: unknown[]): Promise<any> {
   return json;
 }
 
-async function safeDFS(path: string, body: unknown[]): Promise<any> {
+async function safeDFS(path: string, body: unknown[], timeoutMs = 30000): Promise<any> {
   try {
-    return await callDFS(path, body);
+    return await callDFS(path, body, timeoutMs);
   } catch (e) {
     console.error(`[DFS] ${path} exception:`, e);
     return null;
@@ -121,6 +121,204 @@ async function resolveLocation(location: string): Promise<{ code: number | null;
   } catch (e) {
     console.error("[audit] Location resolution failed:", e);
     return { code: null, name: location };
+  }
+}
+
+// ─── Geo-Grid Generator ─────────────────────────────────────────────
+interface GeoGridPoint { lat: number; lng: number }
+interface GeoGridResult { lat: number; lng: number; rank: number; found: boolean; topCompetitor: string }
+interface GeoGridData {
+  solv: number;
+  avgRank: number;
+  gridResults: GeoGridResult[];
+  topCompetitors: Array<{ name: string; appearances: number }>;
+}
+
+function generateGeoGrid(centerLat: number, centerLng: number, spacingKm = 2): GeoGridPoint[] {
+  const points: GeoGridPoint[] = [];
+  const kmPerDegreeLat = 111.32;
+  const kmPerDegreeLng = 111.32 * Math.cos((centerLat * Math.PI) / 180);
+  const latStep = spacingKm / kmPerDegreeLat;
+  const lngStep = spacingKm / kmPerDegreeLng;
+
+  for (let row = -1; row <= 1; row++) {
+    for (let col = -1; col <= 1; col++) {
+      points.push({
+        lat: centerLat + row * latStep,
+        lng: centerLng + col * lngStep,
+      });
+    }
+  }
+  return points;
+}
+
+async function runGeoGrid(
+  keyword: string,
+  businessName: string,
+  centerLat: number,
+  centerLng: number,
+  mapsLocationParam: Record<string, unknown>,
+): Promise<GeoGridData> {
+  const points = generateGeoGrid(centerLat, centerLng);
+  const competitorCounts = new Map<string, number>();
+
+  const results = await Promise.all(
+    points.map(async (pt): Promise<GeoGridResult> => {
+      const resp = await safeDFS("/serp/google/maps/live/advanced", [{
+        keyword,
+        ...mapsLocationParam,
+        language_code: "en",
+        depth: 20,
+        gps_coordinates: { latitude: pt.lat, longitude: pt.lng, radius: 5000 },
+      }], 45000);
+
+      const items = dfsItems(resp);
+      const match = findBusinessInMaps(items, businessName);
+
+      // Track top competitor at this point (first non-target result)
+      let topComp = "";
+      for (const item of items) {
+        const title = (item.title ?? "").toLowerCase().trim();
+        const normalized = businessName.toLowerCase().trim();
+        if (title !== normalized && !title.includes(normalized) && !normalized.includes(title)) {
+          topComp = item.title ?? "";
+          break;
+        }
+      }
+
+      // Count competitor appearances
+      for (const item of items.slice(0, 3)) {
+        const title = item.title ?? "";
+        const titleLower = title.toLowerCase().trim();
+        const normLower = businessName.toLowerCase().trim();
+        if (titleLower !== normLower && !titleLower.includes(normLower) && !normLower.includes(titleLower)) {
+          competitorCounts.set(title, (competitorCounts.get(title) ?? 0) + 1);
+        }
+      }
+
+      return {
+        lat: pt.lat,
+        lng: pt.lng,
+        rank: match.found ? match.rank : 0,
+        found: match.found,
+        topCompetitor: topComp,
+      };
+    })
+  );
+
+  const foundPoints = results.filter((r) => r.found);
+  const top3Points = results.filter((r) => r.found && r.rank <= 3);
+  const solv = results.length > 0 ? top3Points.length / results.length : 0;
+  const avgRank = foundPoints.length > 0
+    ? foundPoints.reduce((s, r) => s + r.rank, 0) / foundPoints.length
+    : 0;
+
+  const topCompetitors = Array.from(competitorCounts.entries())
+    .map(([name, appearances]) => ({ name, appearances }))
+    .sort((a, b) => b.appearances - a.appearances)
+    .slice(0, 5);
+
+  return { solv, avgRank, gridResults: results, topCompetitors };
+}
+
+// ─── Google Reviews Fetcher ─────────────────────────────────────────
+interface ReviewItem { rating: number; text: string; time: string; hasReply: boolean }
+interface ReviewsData {
+  totalReviews: number;
+  avgRating: number;
+  replyRate: number;
+  recentVelocity: number;
+  topReviews: ReviewItem[];
+}
+
+async function fetchGoogleReviews(
+  placeId: string | null,
+  businessName: string,
+  location: string,
+): Promise<ReviewsData | null> {
+  const searchKeyword = placeId ? `@place_id:${placeId}` : `${businessName}, ${location}`;
+  const resp = await safeDFS("/business_data/google/reviews/live", [{
+    keyword: searchKeyword,
+    depth: 20,
+  }]);
+
+  if (!resp) return null;
+
+  const result = resp?.tasks?.[0]?.result?.[0];
+  if (!result) return null;
+
+  const items: any[] = result.items ?? [];
+  const totalReviews = result.reviews_count ?? items.length;
+  const avgRating = result.rating?.value ?? 0;
+
+  let withReply = 0;
+  const reviews: ReviewItem[] = [];
+  const now = Date.now();
+  const ninetyDaysMs = 90 * 24 * 60 * 60 * 1000;
+  let recentCount = 0;
+
+  for (const item of items) {
+    if (item.type !== "google_review") continue;
+    const hasReply = !!(item.review_response?.text ?? item.owner_answer);
+    if (hasReply) withReply++;
+
+    const time = item.timestamp ?? item.time_ago ?? "";
+    const reviewDate = item.timestamp ? new Date(item.timestamp).getTime() : 0;
+    if (reviewDate > 0 && now - reviewDate <= ninetyDaysMs) {
+      recentCount++;
+    }
+
+    reviews.push({
+      rating: item.rating?.value ?? item.review_rating ?? 0,
+      text: item.review_text ?? item.text ?? "",
+      time,
+      hasReply,
+    });
+  }
+
+  const replyRate = reviews.length > 0 ? withReply / reviews.length : 0;
+  const recentVelocity = recentCount > 0 ? (recentCount / 3) : 0; // per month over 90 days
+
+  return {
+    totalReviews,
+    avgRating,
+    replyRate,
+    recentVelocity,
+    topReviews: reviews.slice(0, 10),
+  };
+}
+
+// ─── Apify Citation Checker (future hook) ───────────────────────────
+// TODO: Enable when Apify token is configured — runs take 30-60s, consider async/webhook approach
+// async function runApifyCitationCheck(
+//   businessName: string,
+//   city: string,
+//   state: string,
+//   address: string,
+//   phone: string,
+//   website: string,
+// ): Promise<any> {
+//   const token = process.env.APIFY_TOKEN;
+//   if (!token) return null;
+//   const res = await fetch(
+//     `https://api.apify.com/v2/acts/alizarin_refrigerator-owner~citation-checker-ai/runs?token=${token}`,
+//     {
+//       method: "POST",
+//       headers: { "Content-Type": "application/json" },
+//       body: JSON.stringify({ businessName, city, state, address, phone, website }),
+//       signal: AbortSignal.timeout(60000),
+//     },
+//   );
+//   return res.json();
+// }
+
+async function checkDomainResolves(url: string): Promise<boolean> {
+  try {
+    const fullUrl = url.startsWith("http") ? url : `https://${url}`;
+    const res = await fetch(fullUrl, { method: "HEAD", signal: AbortSignal.timeout(5000), redirect: "follow" });
+    return res.ok || res.status < 500;
+  } catch {
+    return false;
   }
 }
 
@@ -224,7 +422,10 @@ function buildScorecard(
   reviewsRaw: any,
   aiVisRaw: any,
   competitorGapRaw: any,
-  websiteUrl: string | undefined
+  websiteUrl: string | undefined,
+  geoGrid: GeoGridData | null,
+  reviewsData: ReviewsData | null,
+  domainResolves: boolean | null,
 ) {
   const biz = businessMatch.item;
   const local = extractLSEOData(localAuditRaw);
@@ -259,16 +460,20 @@ function buildScorecard(
   const top20Keywords = rankedKeywords.filter((k: any) => k.position <= 20).length;
 
   // ─── 1. Local Pack Ranking ──────────────────────────────────────
-  // rank reflects keyword search position, NOT name search
   let rankScore = 0;
   let rankDetail = "";
 
-  if (businessMatch.found && businessMatch.rank > 0) {
-    // Found in keyword-based Maps search — real local pack ranking
+  if (geoGrid) {
+    // Geo-grid ran — use SoLV-based scoring
+    const solvPct = Math.round(geoGrid.solv * 100);
+    rankScore = clampScore(solvPct);
+    const foundCount = geoGrid.gridResults.filter((r) => r.found && r.rank <= 3).length;
+    rankDetail = `Visible at ${foundCount}/9 grid points (SoLV: ${solvPct}%)`;
+    if (geoGrid.avgRank > 0) rankDetail += ` · Avg rank #${geoGrid.avgRank.toFixed(1)}`;
+  } else if (businessMatch.found && businessMatch.rank > 0) {
     rankScore = clampScore(Math.max(100 - (businessMatch.rank - 1) * 15, 10));
     rankDetail = `Position #${businessMatch.rank} in local pack for target keyword`;
   } else if (businessMatch.found && businessMatch.rank === 0) {
-    // Business exists (found by name) but doesn't rank in keyword search
     rankScore = 5;
     rankDetail = "Has GBP but not ranking in local pack for target keyword";
   } else if (!businessMatch.found && mapsItems.length > 0) {
@@ -286,7 +491,6 @@ function buildScorecard(
 
   // Enrich with organic ranking data if available
   if (totalRankedKeywords > 0) {
-    // Small bonus for organic rankings, capped low — this dimension is about local pack
     const organicBonus = Math.min(top10Keywords * 5 + top20Keywords * 2, 15);
     rankScore = clampScore(rankScore + organicBonus);
     rankDetail += ` · ${totalRankedKeywords} organic keywords (${top10Keywords} in top 10)`;
@@ -346,29 +550,38 @@ function buildScorecard(
   });
 
   // ─── 3. Reviews & Reputation ────────────────────────────────────
-  const revVelocity = local?.review_velocity ?? reviews?.reviews_per_month ?? 0;
-  const replyRate = reviews?.reply_rate ?? 0;
-  const currentRating = rating || reviews?.current_rating || 0;
+  let revVelocity = local?.review_velocity ?? reviews?.reviews_per_month ?? 0;
+  let actualReplyRate = reviews?.reply_rate ?? 0;
+  let currentRating = rating || reviews?.current_rating || 0;
+  let actualReviewsCount = reviewsCount;
+
+  // Use real Google Reviews data if available
+  if (reviewsData) {
+    currentRating = reviewsData.avgRating || currentRating;
+    actualReviewsCount = reviewsData.totalReviews || actualReviewsCount;
+    actualReplyRate = reviewsData.replyRate;
+    revVelocity = reviewsData.recentVelocity || revVelocity;
+  }
 
   let revScore = 0;
   if (currentRating > 0) revScore += (currentRating / 5) * 40;
-  revScore += replyRate * 30;
+  revScore += actualReplyRate * 30;
   revScore += Math.min(revVelocity / 20, 1) * 30;
 
-  // If we have rating from Maps but no velocity data, estimate score from rating + count
-  if (currentRating > 0 && revVelocity === 0 && replyRate === 0) {
-    const countBonus = Math.min(reviewsCount / 100, 1) * 30; // up to 30pts for 100+ reviews
+  // If we have rating but no velocity/reply data, estimate from rating + count
+  if (currentRating > 0 && revVelocity === 0 && actualReplyRate === 0) {
+    const countBonus = Math.min(actualReviewsCount / 100, 1) * 30;
     revScore = (currentRating / 5) * 40 + countBonus;
   }
   revScore = clampScore(revScore);
 
   let revDetail = "";
-  if (currentRating > 0 || reviewsCount > 0) {
+  if (currentRating > 0 || actualReviewsCount > 0) {
     const parts: string[] = [];
     if (currentRating > 0) parts.push(`${currentRating} stars`);
-    if (reviewsCount > 0) parts.push(`${reviewsCount} reviews`);
+    if (actualReviewsCount > 0) parts.push(`${actualReviewsCount} reviews`);
     if (revVelocity > 0) parts.push(`${revVelocity.toFixed(1)}/mo velocity`);
-    if (replyRate > 0) parts.push(`${Math.round(replyRate * 100)}% reply rate`);
+    if (actualReplyRate > 0) parts.push(`${Math.round(actualReplyRate * 100)}% reply rate`);
     revDetail = parts.join(", ");
   } else if (!biz) {
     revDetail = "No Google reviews — create a GBP to start collecting reviews";
@@ -396,7 +609,7 @@ function buildScorecard(
   if (citScore > 0) {
     citDetail = `${citScore}/100 — ${citConsistent}/${citTotal} directories consistent`;
   } else {
-    // Estimate citation health from GBP completeness signals
+    // Estimate citation health from GBP completeness signals + domain check
     // A business with a claimed GBP, phone, address, and website is likely listed in major directories
     const citSignals = [
       biz?.phone,              // Has phone → likely in phone directories
@@ -404,11 +617,12 @@ function buildScorecard(
       biz?.domain || biz?.url, // Has website → likely in web directories
       biz?.is_claimed,         // Claimed GBP → owner manages listings
       biz?.category,           // Has category → better directory matching
+      domainResolves,          // Domain actually resolves → stronger citation signal
     ];
     const citPresent = citSignals.filter(Boolean).length;
     if (citPresent >= 3) {
       finalCitScore = clampScore(Math.round((citPresent / citSignals.length) * 55 + 15));
-      citDetail = `Estimated ${finalCitScore}/100 from GBP signals (${citPresent}/5 key fields present)`;
+      citDetail = `Estimated ${finalCitScore}/100 from GBP signals (${citPresent}/6 key fields present)`;
     } else if (citPresent > 0) {
       finalCitScore = clampScore(citPresent * 10);
       citDetail = `Estimated ${finalCitScore}/100 — incomplete business info limits directory presence`;
@@ -650,7 +864,8 @@ function buildGapAnalysis(
   reviewsRaw: any,
   aiVisRaw: any,
   competitorGapRaw: any,
-  websiteUrl: string | undefined
+  websiteUrl: string | undefined,
+  reviewsData: ReviewsData | null,
 ) {
   const biz = businessMatch.item;
   const local = extractLSEOData(localAuditRaw);
@@ -759,13 +974,19 @@ function buildGapAnalysis(
     });
   }
 
-  // Review reply rate
-  const replyRate = reviews?.reply_rate ?? 0;
-  if (replyRate > 0 && replyRate < 0.8) {
+  // Review reply rate — prefer real reviews data
+  const gapReplyRate = reviewsData?.replyRate ?? reviews?.reply_rate ?? 0;
+  if (gapReplyRate > 0 && gapReplyRate < 0.8) {
     quickWins.push({
-      action: `Increase review reply rate from ${Math.round(replyRate * 100)}% to 90%+`,
+      action: `Increase review reply rate from ${Math.round(gapReplyRate * 100)}% to 90%+`,
       impact: "High — reply rate correlates with higher ratings",
       effort: "30 min/day",
+    });
+  } else if (reviewsData && gapReplyRate === 0 && reviewsData.totalReviews > 0) {
+    quickWins.push({
+      action: "Start replying to Google reviews — currently 0% reply rate",
+      impact: "High — businesses that reply to reviews see 35% higher conversion",
+      effort: "15 min/day",
     });
   }
 
@@ -991,11 +1212,10 @@ export async function POST(request: NextRequest) {
     const nameMatch = findBusinessInMaps(mapsNameItems, business_name);
 
     // businessMatch.rank should reflect keyword ranking, not name ranking
-    // Name search rank is meaningless (searching your own name always returns you #1)
     const businessMatch: BusinessMatch = kwMatch.found
-      ? kwMatch                       // Found in keyword search — real ranking
+      ? kwMatch
       : nameMatch.found
-        ? { ...nameMatch, rank: 0 }   // Found by name only — exists but doesn't rank for keyword
+        ? { ...nameMatch, rank: 0 }
         : { item: null, rank: 0, found: false };
 
     // Merge both result sets for competitor data, dedup by title
@@ -1028,12 +1248,65 @@ export async function POST(request: NextRequest) {
       ]);
       const gbpItem = dfsFirstItem(gbpFallback);
       if (gbpItem) {
-        // Found via GBP — update businessMatch
         businessMatch.item = gbpItem;
         businessMatch.found = true;
-        businessMatch.rank = 0; // not in maps but has GBP
+        businessMatch.rank = 0;
         console.log(`[audit] GBP fallback found: "${gbpItem.title}"`);
       }
+    }
+
+    // ─── Step 4b: Geo-Grid + Reviews + Domain check (parallel) ────
+    const bizItem = businessMatch.item;
+    const hasGPS = bizItem?.latitude && bizItem?.longitude;
+
+    const parallelStep4: Promise<any>[] = [];
+
+    // Geo-grid: only if business has GPS coordinates
+    if (hasGPS) {
+      parallelStep4.push(
+        runGeoGrid(
+          `${kw} ${location.split(",")[0]?.trim()}`,
+          business_name,
+          bizItem.latitude,
+          bizItem.longitude,
+          mapsLocationParam,
+        ).catch((e) => { console.error("[audit] Geo-grid error:", e); return null; })
+      );
+    } else {
+      parallelStep4.push(Promise.resolve(null));
+    }
+
+    // Google Reviews: only if business found with place_id or cid
+    const placeId = bizItem?.place_id ?? null;
+    if (businessMatch.found) {
+      parallelStep4.push(
+        fetchGoogleReviews(placeId, business_name, location).catch((e) => {
+          console.error("[audit] Reviews fetch error:", e);
+          return null;
+        })
+      );
+    } else {
+      parallelStep4.push(Promise.resolve(null));
+    }
+
+    // Domain resolution check
+    const domainUrl = website_url || bizItem?.domain || bizItem?.url;
+    if (domainUrl) {
+      parallelStep4.push(
+        checkDomainResolves(domainUrl).catch(() => false)
+      );
+    } else {
+      parallelStep4.push(Promise.resolve(null));
+    }
+
+    const [geoGridData, reviewsApiData, domainResolves] = await Promise.all(parallelStep4) as [GeoGridData | null, ReviewsData | null, boolean | null];
+
+    if (geoGridData) {
+      const found = geoGridData.gridResults.filter((r) => r.found).length;
+      console.log(`[audit] Geo-grid: ${found}/9 points found, SoLV: ${Math.round(geoGridData.solv * 100)}%, avg rank: ${geoGridData.avgRank.toFixed(1)}`);
+    }
+    if (reviewsApiData) {
+      console.log(`[audit] Reviews API: ${reviewsApiData.totalReviews} reviews, ${reviewsApiData.avgRating} stars, ${Math.round(reviewsApiData.replyRate * 100)}% reply rate`);
     }
 
     // ─── Step 5: LocalSEOData supplemental calls ──────────────────
@@ -1087,13 +1360,13 @@ export async function POST(request: NextRequest) {
     const scorecard = buildScorecard(
       businessMatch, mapsItems, onpageData, rankedKwData,
       localAudit, citations, reviewsVelocity, aiVis, competitorGap,
-      website_url
+      website_url, geoGridData, reviewsApiData, domainResolves,
     );
 
     const gapAnalysis = buildGapAnalysis(
       businessMatch, mapsItems, onpageData, rankedKwData,
       localAudit, citations, reviewsVelocity, aiVis, competitorGap,
-      website_url
+      website_url, reviewsApiData,
     );
 
     const recommendations = extractLSEOData(localAudit)?.recommendations ?? [];
@@ -1136,12 +1409,14 @@ export async function POST(request: NextRequest) {
     const lseoCompetitors = extractLSEOData(localAudit)?.competitors ?? extractLSEOData(competitorGap)?.competitors ?? [];
     const finalCompetitors = competitors.length > 0 ? competitors : lseoCompetitors;
 
+    const geoGridCost = geoGridData ? 9 * 0.002 : 0; // ~$0.002 per Maps call × 9 points
     const dfsCost =
       (mapsNameData?.tasks?.[0]?.cost ?? 0) +
       (mapsKwData?.tasks?.[0]?.cost ?? 0) +
       (onpageData?.tasks?.[0]?.cost ?? 0) +
       (rankedKwData?.tasks?.[0]?.cost ?? 0) +
-      (gbpFallback?.tasks?.[0]?.cost ?? 0);
+      (gbpFallback?.tasks?.[0]?.cost ?? 0) +
+      geoGridCost;
 
     // Build ranked keywords summary for response
     const rkRes = rankedKwData?.tasks?.[0]?.result?.[0];
@@ -1178,6 +1453,8 @@ export async function POST(request: NextRequest) {
       rawProfile,
       competitors: finalCompetitors,
       rankedKeywords: rankedKeywordsSummary,
+      geoGrid: geoGridData,
+      reviewsData: reviewsApiData,
       dataSources: {
         dataforseo: {
           businessFound: businessMatch.found,
@@ -1186,6 +1463,8 @@ export async function POST(request: NextRequest) {
           mapsResults: mapsItems.length,
           locationResolved: loc.code ? `${loc.name} (${loc.code})` : loc.name,
           rankedKeywords: !!rkRes,
+          geoGrid: !!geoGridData,
+          googleReviews: !!reviewsApiData,
           cost: `$${dfsCost.toFixed(4)}`,
         },
         localseodata: {
