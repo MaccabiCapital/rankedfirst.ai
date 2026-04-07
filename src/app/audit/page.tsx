@@ -395,6 +395,42 @@ export default function AuditPage() {
                     </div>
                   </div>
                 )}
+
+                {/* Keyword Discovery — shown when not ranking for target keyword */}
+                {(report as any).keywordDiscovery && (report as any).keywordDiscovery.length > 0 && (
+                  <div className="bg-navy-900 border border-accent-500/20 rounded-xl overflow-hidden">
+                    <div className="p-5 border-b border-navy-800">
+                      <h3 className="font-display font-bold text-lg text-white flex items-center gap-2">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-5 h-5 text-accent-400">
+                          <path d="M12 18v-5.25m0 0a6.01 6.01 0 0 0 1.5-.189m-1.5.189a6.01 6.01 0 0 1-1.5-.189m3.75 7.478a12.06 12.06 0 0 1-4.5 0m3.75 2.383a14.406 14.406 0 0 1-3 0M14.25 18v-.192c0-.983.658-1.823 1.508-2.316a7.5 7.5 0 1 0-7.517 0c.85.493 1.509 1.333 1.509 2.316V18" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                        Keyword Discovery
+                      </h3>
+                      <p className="text-sm text-navy-400 mt-1">You don't rank for your target keyword in the local pack. Here are related keywords extracted from your GBP and website — and whether you rank for them.</p>
+                    </div>
+                    <table className="w-full">
+                      <thead><tr className="text-left text-xs font-mono uppercase tracking-wider text-navy-400 border-b border-navy-800">
+                        <th className="px-5 py-3">Keyword</th><th className="px-5 py-3">Source</th><th className="px-5 py-3">In Local Pack?</th><th className="px-5 py-3">Rank</th>
+                      </tr></thead>
+                      <tbody className="divide-y divide-navy-800">
+                        {((report as any).keywordDiscovery as Array<{keyword: string; source: string; found: boolean; rank: number}>).map((kd, i) => (
+                          <tr key={i} className="hover:bg-navy-800/30">
+                            <td className="px-5 py-3 text-sm font-display font-medium text-white">{kd.keyword}</td>
+                            <td className="px-5 py-3"><span className="text-xs font-mono px-2 py-0.5 rounded bg-navy-800 text-navy-300">{kd.source}</span></td>
+                            <td className="px-5 py-3 text-sm font-mono">
+                              {kd.found ? <span className="text-emerald-400">&#10003; Yes</span> : <span className="text-red-400">&#10007; No</span>}
+                            </td>
+                            <td className="px-5 py-3">
+                              {kd.found ? (
+                                <span className={`inline-flex items-center justify-center w-8 h-6 rounded text-xs font-mono font-bold ${kd.rank <= 3 ? "bg-emerald-500/20 text-emerald-400" : "bg-amber-500/10 text-amber-400"}`}>#{kd.rank}</span>
+                              ) : <span className="text-navy-600">—</span>}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
             )}
 

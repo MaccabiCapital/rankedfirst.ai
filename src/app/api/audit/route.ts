@@ -211,38 +211,19 @@ interface ReviewsData {
   topReviews: ReviewItem[];
 }
 
-async function fetchGoogleReviews(placeId: string | null, businessName: string, location: string): Promise<ReviewsData | null> {
-  const searchKeyword = placeId ? `@place_id:${placeId}` : `${businessName}, ${location}`;
-  const resp = await safeDFS("/business_data/google/reviews/live", [{ keyword: searchKeyword, depth: 20 }]);
-  if (!resp) return null;
-  const result = resp?.tasks?.[0]?.result?.[0];
-  if (!result) return null;
-  const items: any[] = result.items ?? [];
-  const totalReviews = result.reviews_count ?? items.length;
-  const avgRating = result.rating?.value ?? 0;
-  let withReply = 0;
-  const reviews: ReviewItem[] = [];
-  const now = Date.now();
-  const ninetyDaysMs = 90 * 24 * 60 * 60 * 1000;
-  let recentCount = 0;
-  const dist: Record<string, number> = { "5": 0, "4": 0, "3": 0, "2": 0, "1": 0 };
-  for (const item of items) {
-    if (item.type !== "google_review") continue;
-    const hasReply = !!(item.review_response?.text ?? item.owner_answer);
-    if (hasReply) withReply++;
-    const r = item.rating?.value ?? item.review_rating ?? 0;
-    if (r >= 1 && r <= 5) dist[String(Math.round(r))] = (dist[String(Math.round(r))] ?? 0) + 1;
-    const time = item.timestamp ?? item.time_ago ?? "";
-    const reviewDate = item.timestamp ? new Date(item.timestamp).getTime() : 0;
-    if (reviewDate > 0 && now - reviewDate <= ninetyDaysMs) recentCount++;
-    reviews.push({ rating: r, text: item.review_text ?? item.text ?? "", time, hasReply });
-  }
+// Build reviews data from Maps SERP business data (DFS Reviews API is async-only, too slow for real-time)
+function buildReviewsFromMaps(biz: any): ReviewsData | null {
+  if (!biz) return null;
+  const totalReviews = biz.rating?.votes_count ?? 0;
+  const avgRating = biz.rating?.value ?? 0;
+  if (totalReviews === 0 && avgRating === 0) return null;
   return {
-    totalReviews, avgRating,
-    replyRate: reviews.length > 0 ? withReply / reviews.length : 0,
-    recentVelocity: recentCount > 0 ? recentCount / 3 : 0,
-    ratingDistribution: dist,
-    topReviews: reviews.slice(0, 10),
+    totalReviews,
+    avgRating,
+    replyRate: 0, // Can't determine from Maps data
+    recentVelocity: 0, // Can't determine from Maps data
+    ratingDistribution: { "5": 0, "4": 0, "3": 0, "2": 0, "1": 0 },
+    topReviews: [],
   };
 }
 
@@ -310,6 +291,7 @@ interface TechnicalData {
   hasViewport: boolean; hasCanonical: boolean; hasNapOnSite: boolean;
   wordCount: number; internalLinks: number; externalLinks: number;
   imagesWithAlt: number; imagesWithoutAlt: number; hasGa4: boolean;
+  titleTag: string; metaDescription: string; metaKeywords: string;
 }
 
 const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
@@ -400,6 +382,10 @@ async function analyzeWebsite(url: string, bizAddress: string, bizPhone: string)
       bizAddress && bizAddress.split(",")[0] && normalText.includes(bizAddress.split(",")[0].toLowerCase().trim())
     );
 
+    // Extract meta keywords if present
+    const metaKwMatch = html.match(/<meta[^>]+name\s*=\s*["']keywords["'][^>]+content\s*=\s*["']([^"']*)["']/i)
+      ?? html.match(/<meta[^>]+content\s*=\s*["']([^"']*)["'][^>]+name\s*=\s*["']keywords["']/i);
+
     return {
       hasHttps, hasRobotsTxt, hasSitemap,
       hasSchema: schemaTypes.length > 0, schemaTypes,
@@ -408,6 +394,9 @@ async function analyzeWebsite(url: string, bizAddress: string, bizPhone: string)
       hasViewport, hasCanonical, hasNapOnSite,
       wordCount, internalLinks, externalLinks,
       imagesWithAlt, imagesWithoutAlt, hasGa4,
+      titleTag: titleMatch?.[1]?.trim() ?? "",
+      metaDescription: descMatch?.[1] ?? "",
+      metaKeywords: metaKwMatch?.[1] ?? "",
     };
   } catch (e) {
     console.error("[HTML] exception:", e);
@@ -490,6 +479,101 @@ async function fetchIndexedPages(domain: string, locationParam: Record<string, u
   if (!resp) return null;
   const result = resp?.tasks?.[0]?.result?.[0];
   return result?.items_count ?? result?.se_results_count ?? null;
+}
+
+// ─── Keyword Discovery ─────────────────────────────────────────────
+// When SoLV=0 for the target keyword, extract keyword candidates from GBP + website
+// and check which ones the business actually ranks for in the local pack
+interface KeywordDiscoveryResult {
+  keyword: string;
+  source: string; // 'category' | 'service' | 'meta' | 'title'
+  found: boolean;
+  rank: number;
+}
+
+function extractKeywordCandidates(
+  biz: any, technical: TechnicalData | null, originalKeyword: string, city: string,
+): Array<{ keyword: string; source: string }> {
+  const candidates: Array<{ keyword: string; source: string }> = [];
+  const seen = new Set<string>();
+  const origLower = originalKeyword.toLowerCase();
+  seen.add(origLower);
+
+  const addCandidate = (kw: string, source: string) => {
+    const normalized = kw.toLowerCase().trim();
+    if (normalized.length < 3 || normalized.length > 60 || seen.has(normalized)) return;
+    seen.add(normalized);
+    candidates.push({ keyword: `${kw} ${city}`, source });
+  };
+
+  // 1. GBP primary category
+  if (biz?.category) addCandidate(biz.category, "category");
+
+  // 2. GBP additional categories
+  for (const cat of (biz?.additional_categories ?? [])) {
+    const catStr = typeof cat === "string" ? cat : cat?.type ?? "";
+    if (catStr) addCandidate(catStr, "category");
+  }
+
+  // 3. Website title keywords (extract meaningful phrases)
+  if (technical?.titleTag) {
+    const title = technical.titleTag;
+    // Split on common separators and take meaningful phrases
+    const parts = title.split(/[|\-\u2013\u2014,]/).map((p: string) => p.trim()).filter((p: string) => p.length > 3 && p.length < 40);
+    for (const part of parts.slice(0, 3)) {
+      // Skip if it's just the business name
+      if (part.toLowerCase() !== (biz?.title ?? "").toLowerCase()) {
+        addCandidate(part, "title");
+      }
+    }
+  }
+
+  // 4. Meta description keywords (extract first phrase)
+  if (technical?.metaDescription) {
+    const desc = technical.metaDescription;
+    const firstSentence = desc.split(/[.!?]/)[0]?.trim();
+    if (firstSentence && firstSentence.length > 10 && firstSentence.length < 60) {
+      addCandidate(firstSentence, "meta");
+    }
+  }
+
+  // 5. Meta keywords (if present)
+  if (technical?.metaKeywords) {
+    const mkws = technical.metaKeywords.split(",").map((k: string) => k.trim()).filter((k: string) => k.length > 2);
+    for (const mkw of mkws.slice(0, 5)) {
+      addCandidate(mkw, "meta");
+    }
+  }
+
+  return candidates.slice(0, 5); // Check max 5 keywords (~$0.01)
+}
+
+async function discoverRankableKeywords(
+  candidates: Array<{ keyword: string; source: string }>,
+  businessName: string,
+  mapsLocationParam: Record<string, unknown>,
+): Promise<KeywordDiscoveryResult[]> {
+  if (candidates.length === 0) return [];
+
+  const results = await Promise.allSettled(
+    candidates.map(async (c): Promise<KeywordDiscoveryResult> => {
+      const resp = await safeDFS("/serp/google/maps/live/advanced", [{
+        keyword: c.keyword, ...mapsLocationParam, language_code: "en", depth: 20,
+      }]);
+      const items = dfsItems(resp);
+      const match = findBusinessInMaps(items, businessName);
+      return {
+        keyword: c.keyword,
+        source: c.source,
+        found: match.found,
+        rank: match.found ? match.rank : 0,
+      };
+    })
+  );
+
+  return results
+    .filter((r): r is PromiseFulfilledResult<KeywordDiscoveryResult> => r.status === "fulfilled")
+    .map((r) => r.value);
 }
 
 // ─── Competitor Keyword Gap ──────────────────────────────────────────
@@ -960,28 +1044,56 @@ export async function POST(request: NextRequest) {
     const ownKeywordsTotal = rkResult?.total_count ?? 0;
     const ownETV = rkResult?.metrics?.organic?.etv ?? 0;
 
-    // ─── Wave 2: Geo-grid + Reviews + Indexing + Dirs + HTML ────────
+    // ─── Extract keyword candidates from GBP data (available now, no extra call) ───
+    // Combine: user-provided keyword + GBP categories + additional categories
+    // We'll check these in parallel with everything else in Wave 2
+    const kwCandidates: Array<{ keyword: string; source: string }> = [];
+    if (businessMatch.found) {
+      const seen = new Set<string>();
+      seen.add(kw.toLowerCase());
+      const addKw = (k: string, src: string) => {
+        const norm = k.toLowerCase().trim();
+        if (norm.length < 3 || norm.length > 50 || seen.has(norm)) return;
+        seen.add(norm);
+        kwCandidates.push({ keyword: `${k} ${city}`, source: src });
+      };
+      if (biz?.category) addKw(biz.category, "category");
+      for (const cat of (biz?.additional_categories ?? [])) {
+        const cs = typeof cat === "string" ? cat : cat?.type ?? "";
+        if (cs) addKw(cs, "category");
+      }
+      // Also add the user keyword + city variant if different
+      if (keyword && keyword.toLowerCase() !== business_name.toLowerCase()) {
+        addKw(keyword, "user");
+      }
+    }
+    const kwsToCheck = kwCandidates.slice(0, 5);
+    console.log(`[audit] Keyword candidates: ${kwsToCheck.length} (${kwsToCheck.map(k => k.keyword).join(", ")})`);
+
+    // ─── Wave 2: Geo-grid + Reviews + Indexing + Dirs + HTML + Keyword Discovery ───
+    // All in parallel — one wave, no sequential steps
     const wave2: Promise<any>[] = [
       // 5. Geo-grid (if GPS)
       hasGPS
         ? runGeoGrid(`${kw} ${city}`, business_name, biz.latitude, biz.longitude, mapsLocationParam)
             .catch((e) => { console.error("[audit] Geo-grid error:", e); return null; })
         : Promise.resolve(null),
-      // 6. Google Reviews (if found)
-      businessMatch.found
-        ? fetchGoogleReviews(biz?.place_id ?? null, business_name, location)
-            .catch((e) => { console.error("[audit] Reviews error:", e); return null; })
-        : Promise.resolve(null),
+      // 6. Reviews from Maps data (sync — no API call needed)
+      Promise.resolve(buildReviewsFromMaps(biz)),
       // 7. Indexed pages (if website)
       domain ? fetchIndexedPages(domain, mapsLocationParam).catch(() => null) : Promise.resolve(null),
       // 8. Directory presence
       checkDirectories(business_name, location, bizAddress, bizPhone),
       // 9. Website HTML analysis (if website)
       fullUrl ? analyzeWebsite(fullUrl, bizAddress, bizPhone).catch(() => null) : Promise.resolve(null),
+      // 10. Keyword discovery — check each candidate in Maps (parallel within parallel)
+      kwsToCheck.length > 0
+        ? discoverRankableKeywords(kwsToCheck, business_name, mapsLocationParam).catch(() => [])
+        : Promise.resolve([]),
     ];
 
-    const [geoGridData, reviewsApiData, indexedPages, directories, technicalData] =
-      await Promise.all(wave2) as [GeoGridData | null, ReviewsData | null, number | null, DirectoryResult[], TechnicalData | null];
+    const [geoGridData, reviewsApiData, indexedPages, directories, technicalData, keywordDiscovery] =
+      await Promise.all(wave2) as [GeoGridData | null, ReviewsData | null, number | null, DirectoryResult[], TechnicalData | null, KeywordDiscoveryResult[]];
 
     if (geoGridData) {
       const found = geoGridData.gridResults.filter((r) => r.found).length;
@@ -992,9 +1104,35 @@ export async function POST(request: NextRequest) {
     }
 
     // ─── Wave 3: Competitor keyword gap (parallel) ──────────────────
-    // Get top 3 competitor domains from geo-grid or Maps
+    // Merge competitors from Maps name search + geo-grid top competitors
+    // The geo-grid has the real keyword-based competitors; name search often has none
     const competitorDomains: Array<{ name: string; domain: string }> = [];
-    const allCompetitors = mapsNameItems.filter((c: any) => c !== biz);
+    const allMapsCompetitors = mapsNameItems.filter((c: any) => c !== biz);
+
+    // Also look up competitor details from geo-grid data
+    // The geo-grid topCompetitors have names but no domains, so we do an additional
+    // Maps keyword search to get full competitor data if name search had no competitors
+    let enrichedMapsItems = mapsNameItems;
+    if (allMapsCompetitors.length === 0 && geoGridData?.topCompetitors?.length) {
+      // Run one keyword Maps search to get competitor details
+      const kwMapsResp = await safeDFS("/serp/google/maps/live/advanced", [{
+        keyword: `${kw} ${city}`, ...mapsLocationParam, language_code: "en", depth: 20,
+      }]).catch(() => null);
+      const kwMapsItems = dfsItems(kwMapsResp);
+      if (kwMapsItems.length > 0) {
+        // Merge keyword Maps items as competitors (exclude our business)
+        const seenTitles = new Set(mapsNameItems.map((c: any) => (c.title ?? "").toLowerCase()));
+        for (const item of kwMapsItems) {
+          const title = (item.title ?? "").toLowerCase();
+          if (!seenTitles.has(title)) {
+            seenTitles.add(title);
+            enrichedMapsItems.push(item);
+          }
+        }
+      }
+    }
+
+    const allCompetitors = enrichedMapsItems.filter((c: any) => c !== biz);
     for (const c of allCompetitors.slice(0, 3)) {
       const d = c.domain ?? "";
       if (d) competitorDomains.push({ name: c.title ?? "Unknown", domain: d.replace(/^www\./, "") });
@@ -1044,13 +1182,16 @@ export async function POST(request: NextRequest) {
 
     // ─── Build Report ───────────────────────────────────────────────
     const report = buildReport(
-      businessMatch, mapsNameItems, geoGridData, reviewsApiData,
+      businessMatch, enrichedMapsItems, geoGridData, reviewsApiData,
       lighthouseData as LighthouseData | null,
       technicalData, pageRankData as number | null,
       indexedPages, directories, ownKeywords, ownKeywordsTotal, ownETV,
       competitorKeywordSets, competitorPageRanks,
       body, loc,
     );
+
+    // Attach keyword discovery to report
+    (report as any).keywordDiscovery = keywordDiscovery.length > 0 ? keywordDiscovery : null;
 
     return NextResponse.json({ status: "success", report });
   } catch (e) {
