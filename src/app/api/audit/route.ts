@@ -218,6 +218,7 @@ function buildScorecard(
   businessMatch: BusinessMatch,
   mapsItems: any[],
   onpageData: any,
+  rankedKwData: any,
   localAuditRaw: any,
   citationsRaw: any,
   reviewsRaw: any,
@@ -238,6 +239,25 @@ function buildScorecard(
   const rating = biz?.rating?.value ?? local?.rating?.value ?? 0;
   const reviewsCount = biz?.rating?.votes_count ?? local?.reviews_count ?? local?.rating?.votes_count ?? 0;
 
+  // ─── Parse ranked keywords data ─────────────────────────────────
+  const rkResult = rankedKwData?.tasks?.[0]?.result?.[0];
+  const rankedKeywords: any[] = (rkResult?.items ?? []).map((it: any) => {
+    const kd = it.keyword_data ?? {};
+    const ki = kd.keyword_info ?? {};
+    const serp = it.ranked_serp_element?.serp_item ?? {};
+    return {
+      keyword: kd.keyword ?? "",
+      position: serp.rank_group ?? 0,
+      searchVolume: ki.search_volume ?? 0,
+      type: serp.type ?? "organic",
+      url: serp.relative_url ?? "",
+    };
+  });
+  const totalRankedKeywords = rkResult?.total_count ?? 0;
+  const organicETV = rkResult?.metrics?.organic?.etv ?? 0;
+  const top10Keywords = rankedKeywords.filter((k: any) => k.position <= 10).length;
+  const top20Keywords = rankedKeywords.filter((k: any) => k.position <= 20).length;
+
   // ─── 1. Local Pack Ranking ──────────────────────────────────────
   let rankScore = 0;
   let rankDetail = "";
@@ -246,9 +266,8 @@ function buildScorecard(
     rankScore = clampScore(Math.max(100 - (businessMatch.rank - 1) * 15, 10));
     rankDetail = `Position #${businessMatch.rank} in local pack`;
   } else if (!businessMatch.found && mapsItems.length > 0) {
-    // Business was NOT found in maps results — this is a real finding
     rankScore = 0;
-    rankDetail = "Not found in local map pack — critical visibility gap";
+    rankDetail = "Not found in local map pack";
   } else {
     const packPos = local?.local_pack_position;
     if (packPos && packPos > 0) {
@@ -257,6 +276,16 @@ function buildScorecard(
     } else {
       rankDetail = "Not found in local pack";
     }
+  }
+
+  // Enrich with organic ranking data if available
+  if (totalRankedKeywords > 0) {
+    // Give partial credit for organic keyword rankings even if not in map pack
+    const organicBonus = Math.min(top10Keywords * 15 + top20Keywords * 5, 40);
+    if (rankScore === 0) {
+      rankScore = clampScore(organicBonus);
+    }
+    rankDetail += ` · ${totalRankedKeywords} organic keywords (${top10Keywords} in top 10)`;
   }
 
   dimensions.push({
@@ -532,6 +561,7 @@ function buildGapAnalysis(
   businessMatch: BusinessMatch,
   mapsItems: any[],
   onpageData: any,
+  rankedKwData: any,
   localAuditRaw: any,
   citationsRaw: any,
   reviewsRaw: any,
@@ -677,6 +707,49 @@ function buildGapAnalysis(
     }
   }
 
+  // ─── Keyword gap recommendations ──────────────────────────────
+  const rkResult = rankedKwData?.tasks?.[0]?.result?.[0];
+  const totalRankedKw = rkResult?.total_count ?? 0;
+  const rkItems: any[] = rkResult?.items ?? [];
+  const top10Kw = rkItems.filter((it: any) => (it.ranked_serp_element?.serp_item?.rank_group ?? 999) <= 10).length;
+  const top20Kw = rkItems.filter((it: any) => (it.ranked_serp_element?.serp_item?.rank_group ?? 999) <= 20).length;
+
+  if (totalRankedKw === 0 && websiteUrl) {
+    strategic.push({
+      action: "Your domain ranks for 0 keywords — build keyword-targeted content (blog, service pages) to gain organic visibility",
+      impact: "Critical — organic keyword rankings drive free traffic",
+      timeline: "1–3 months",
+    });
+  } else if (totalRankedKw > 0 && top10Kw === 0) {
+    strategic.push({
+      action: `You rank for ${totalRankedKw} keywords but none in the top 10 — optimize top-ranking pages to push into page 1`,
+      impact: "High — page 1 gets 90%+ of organic clicks",
+      timeline: "1–2 months",
+    });
+  } else if (top10Kw > 0 && top10Kw < 5) {
+    quickWins.push({
+      action: `Expand from ${top10Kw} top-10 keywords — create content targeting related long-tail terms`,
+      impact: "High — you have page-1 authority, leverage it for more keywords",
+      effort: "Ongoing, 2–3 hrs/week",
+    });
+  }
+
+  // Check for keyword-service misalignment (business keyword not in ranked keywords)
+  if (totalRankedKw > 0 && biz) {
+    const kwLower = (biz.category ?? "").toLowerCase();
+    const hasRelevantKw = rkItems.some((it: any) => {
+      const kw = ((it.keyword_data?.keyword) ?? "").toLowerCase();
+      return kwLower.split(/\s+/).some((w: string) => w.length > 3 && kw.includes(w));
+    });
+    if (!hasRelevantKw && kwLower) {
+      strategic.push({
+        action: `None of your ranked keywords relate to "${biz.category}" — create service-focused content targeting your core business keywords`,
+        impact: "High — you may be ranking for irrelevant terms",
+        timeline: "1–2 months",
+      });
+    }
+  }
+
   // ─── Competitor insights from Maps ──────────────────────────────
   const competitors = mapsItems.filter((item: any) => item !== biz);
   const competitorInsights = competitors.slice(0, 5).map((c: any) => ({
@@ -761,12 +834,11 @@ export async function POST(request: NextRequest) {
     // ─── Step 2: DataForSEO parallel calls ────────────────────────
     const dfsPromises: Promise<any>[] = [];
 
-    // 2a. Maps SERP — search for the business name directly
-    //     This finds the business AND competitors in one call
     const mapsLocationParam = loc.code
       ? { location_code: loc.code }
       : { location_name: loc.name };
 
+    // 2a. Maps SERP #1 — search for business name (to find the business)
     dfsPromises.push(
       safeDFS("/serp/google/maps/live/advanced", [
         {
@@ -778,7 +850,19 @@ export async function POST(request: NextRequest) {
       ])
     );
 
-    // 2b. On-Page Instant Pages (if website provided)
+    // 2b. Maps SERP #2 — search for keyword (to find competitors)
+    dfsPromises.push(
+      safeDFS("/serp/google/maps/live/advanced", [
+        {
+          keyword: `${kw} ${location.split(",")[0]?.trim()}`,
+          ...mapsLocationParam,
+          language_code: "en",
+          depth: 20,
+        },
+      ])
+    );
+
+    // 2c. On-Page Instant Pages (if website provided)
     if (website_url) {
       const url = website_url.startsWith("http") ? website_url : `https://${website_url}`;
       dfsPromises.push(
@@ -793,11 +877,52 @@ export async function POST(request: NextRequest) {
       dfsPromises.push(Promise.resolve(null));
     }
 
-    const [mapsData, onpageData] = await Promise.all(dfsPromises);
+    // 2d. Ranked Keywords (if website provided) — what keywords does the domain rank for?
+    if (website_url) {
+      const domain = website_url.replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/\/.*$/, "");
+      const rankedKwLocationCode = loc.code ?? 2840; // default to US if no code
+      dfsPromises.push(
+        safeDFS("/dataforseo_labs/google/ranked_keywords/live", [
+          {
+            target: domain,
+            location_code: rankedKwLocationCode,
+            language_code: "en",
+            limit: 50,
+            order_by: ["ranked_serp_element.serp_item.rank_group,asc"],
+          },
+        ])
+      );
+    } else {
+      dfsPromises.push(Promise.resolve(null));
+    }
 
-    // ─── Step 3: Find our business in Maps results ────────────────
-    const mapsItems = dfsItems(mapsData);
-    const businessMatch = findBusinessInMaps(mapsItems, business_name);
+    const [mapsNameData, mapsKwData, onpageData, rankedKwData] = await Promise.all(dfsPromises);
+
+    // ─── Step 3: Find our business + merge competitor data ─────────
+    const mapsNameItems = dfsItems(mapsNameData);
+    const mapsKwItems = dfsItems(mapsKwData);
+    const businessMatch = findBusinessInMaps(mapsNameItems, business_name);
+
+    // Also check keyword results for the business
+    if (!businessMatch.found) {
+      const kwMatch = findBusinessInMaps(mapsKwItems, business_name);
+      if (kwMatch.found) {
+        businessMatch.item = kwMatch.item;
+        businessMatch.rank = kwMatch.rank;
+        businessMatch.found = true;
+      }
+    }
+
+    // Merge both result sets for competitor data, dedup by title
+    const seenTitles = new Set<string>();
+    const mapsItems: any[] = [];
+    for (const item of [...mapsNameItems, ...mapsKwItems]) {
+      const title = (item.title ?? "").toLowerCase();
+      if (!seenTitles.has(title)) {
+        seenTitles.add(title);
+        mapsItems.push(item);
+      }
+    }
 
     console.log(
       `[audit] Maps: ${mapsItems.length} results. Business found: ${businessMatch.found}${businessMatch.found ? ` (rank #${businessMatch.rank}: "${businessMatch.item?.title}")` : ""}`
@@ -875,13 +1000,13 @@ export async function POST(request: NextRequest) {
 
     // ─── Step 6: Build Scorecard & Gap Analysis ───────────────────
     const scorecard = buildScorecard(
-      businessMatch, mapsItems, onpageData,
+      businessMatch, mapsItems, onpageData, rankedKwData,
       localAudit, citations, reviewsVelocity, aiVis, competitorGap,
       website_url
     );
 
     const gapAnalysis = buildGapAnalysis(
-      businessMatch, mapsItems, onpageData,
+      businessMatch, mapsItems, onpageData, rankedKwData,
       localAudit, citations, reviewsVelocity, aiVis, competitorGap,
       website_url
     );
@@ -927,9 +1052,32 @@ export async function POST(request: NextRequest) {
     const finalCompetitors = competitors.length > 0 ? competitors : lseoCompetitors;
 
     const dfsCost =
-      (mapsData?.tasks?.[0]?.cost ?? 0) +
+      (mapsNameData?.tasks?.[0]?.cost ?? 0) +
+      (mapsKwData?.tasks?.[0]?.cost ?? 0) +
       (onpageData?.tasks?.[0]?.cost ?? 0) +
+      (rankedKwData?.tasks?.[0]?.cost ?? 0) +
       (gbpFallback?.tasks?.[0]?.cost ?? 0);
+
+    // Build ranked keywords summary for response
+    const rkRes = rankedKwData?.tasks?.[0]?.result?.[0];
+    const rankedKeywordsSummary = rkRes ? {
+      totalKeywords: rkRes.total_count ?? 0,
+      estimatedTraffic: rkRes.metrics?.organic?.etv ?? 0,
+      positionDistribution: rkRes.metrics?.organic ?? {},
+      topKeywords: (rkRes.items ?? []).slice(0, 20).map((it: any) => {
+        const kd = it.keyword_data ?? {};
+        const ki = kd.keyword_info ?? {};
+        const serp = it.ranked_serp_element?.serp_item ?? {};
+        return {
+          keyword: kd.keyword ?? "",
+          position: serp.rank_group ?? 0,
+          searchVolume: ki.search_volume ?? 0,
+          type: serp.type ?? "organic",
+          url: serp.relative_url ?? "",
+          cpc: ki.cpc ?? 0,
+        };
+      }),
+    } : null;
 
     return NextResponse.json({
       status: "success",
@@ -944,6 +1092,7 @@ export async function POST(request: NextRequest) {
       recommendations,
       rawProfile,
       competitors: finalCompetitors,
+      rankedKeywords: rankedKeywordsSummary,
       dataSources: {
         dataforseo: {
           businessFound: businessMatch.found,
@@ -951,6 +1100,7 @@ export async function POST(request: NextRequest) {
           onpage: !!dfsFirstItem(onpageData),
           mapsResults: mapsItems.length,
           locationResolved: loc.code ? `${loc.name} (${loc.code})` : loc.name,
+          rankedKeywords: !!rkRes,
           cost: `$${dfsCost.toFixed(4)}`,
         },
         localseodata: {

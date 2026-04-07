@@ -33,6 +33,22 @@ interface CompetitorInsight {
   rank: number;
 }
 
+interface RankedKeyword {
+  keyword: string;
+  position: number;
+  searchVolume: number;
+  type: string;
+  url: string;
+  cpc: number;
+}
+
+interface RankedKeywordsSummary {
+  totalKeywords: number;
+  estimatedTraffic: number;
+  positionDistribution: Record<string, unknown>;
+  topKeywords: RankedKeyword[];
+}
+
 interface AuditResult {
   status: string;
   business: {
@@ -54,6 +70,7 @@ interface AuditResult {
   recommendations: string[];
   rawProfile: Record<string, unknown> | null;
   competitors: Array<Record<string, unknown>>;
+  rankedKeywords: RankedKeywordsSummary | null;
   creditsUsed?: number;
   creditsRemaining?: number | null;
 }
@@ -183,7 +200,7 @@ export default function AuditPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<AuditResult | null>(null);
-  const [activeTab, setActiveTab] = useState<"scorecard" | "gaps" | "plan">("scorecard");
+  const [activeTab, setActiveTab] = useState<"scorecard" | "keywords" | "gaps" | "plan">("scorecard");
   const resultsRef = useRef<HTMLDivElement>(null);
 
   async function runAudit(e: React.FormEvent) {
@@ -397,10 +414,11 @@ export default function AuditPage() {
             <div className="flex gap-1 mb-8 bg-navy-900 border border-navy-800 rounded-xl p-1.5 w-fit">
               {(
                 [
-                  { key: "scorecard", label: "Scorecard" },
-                  { key: "gaps", label: "Competitive Gaps" },
-                  { key: "plan", label: "Action Plan" },
-                ] as const
+                  { key: "scorecard" as const, label: "Scorecard" },
+                  { key: "keywords" as const, label: `Keywords${result.rankedKeywords ? ` (${result.rankedKeywords.totalKeywords})` : ""}` },
+                  { key: "gaps" as const, label: "Competitive Gaps" },
+                  { key: "plan" as const, label: "Action Plan" },
+                ]
               ).map((tab) => (
                 <button
                   key={tab.key}
@@ -473,6 +491,120 @@ export default function AuditPage() {
                         </li>
                       ))}
                     </ul>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Keywords Tab */}
+            {activeTab === "keywords" && (
+              <div className="space-y-6">
+                {result.rankedKeywords && result.rankedKeywords.totalKeywords > 0 ? (
+                  <>
+                    {/* Summary cards */}
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                      <div className="bg-navy-900 border border-navy-800 rounded-xl p-5">
+                        <p className="text-xs font-mono text-navy-400 uppercase tracking-wider mb-1">Total Keywords</p>
+                        <p className="text-2xl font-display font-bold text-white">{result.rankedKeywords.totalKeywords}</p>
+                      </div>
+                      <div className="bg-navy-900 border border-navy-800 rounded-xl p-5">
+                        <p className="text-xs font-mono text-navy-400 uppercase tracking-wider mb-1">Est. Monthly Traffic</p>
+                        <p className="text-2xl font-display font-bold text-white">{Math.round(result.rankedKeywords.estimatedTraffic).toLocaleString()}</p>
+                      </div>
+                      <div className="bg-navy-900 border border-navy-800 rounded-xl p-5">
+                        <p className="text-xs font-mono text-navy-400 uppercase tracking-wider mb-1">Top 10 Keywords</p>
+                        <p className="text-2xl font-display font-bold text-emerald-400">
+                          {result.rankedKeywords.topKeywords.filter(k => k.position <= 10).length}
+                        </p>
+                      </div>
+                      <div className="bg-navy-900 border border-navy-800 rounded-xl p-5">
+                        <p className="text-xs font-mono text-navy-400 uppercase tracking-wider mb-1">Top 20 Keywords</p>
+                        <p className="text-2xl font-display font-bold text-amber-400">
+                          {result.rankedKeywords.topKeywords.filter(k => k.position <= 20).length}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Keywords table */}
+                    <div className="bg-navy-900 border border-navy-800 rounded-xl overflow-hidden">
+                      <div className="p-5 border-b border-navy-800">
+                        <h3 className="font-display font-bold text-lg text-white">Ranked Keywords</h3>
+                        <p className="text-sm text-navy-400 mt-1">
+                          Top keywords this domain ranks for in Google organic results
+                        </p>
+                      </div>
+                      <div className="overflow-x-auto">
+                        <table className="w-full">
+                          <thead>
+                            <tr className="text-left text-xs font-mono uppercase tracking-wider text-navy-400 border-b border-navy-800">
+                              <th className="px-5 py-3">Keyword</th>
+                              <th className="px-5 py-3">Position</th>
+                              <th className="px-5 py-3">Search Vol</th>
+                              <th className="px-5 py-3">CPC</th>
+                              <th className="px-5 py-3">Type</th>
+                              <th className="px-5 py-3">URL</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-navy-800">
+                            {result.rankedKeywords.topKeywords.map((kw, i) => (
+                              <tr key={i} className="hover:bg-navy-800/30 transition-colors">
+                                <td className="px-5 py-3.5 text-sm font-display font-medium text-white">
+                                  {kw.keyword}
+                                </td>
+                                <td className="px-5 py-3.5">
+                                  <span className={`inline-flex items-center justify-center w-8 h-6 rounded text-xs font-mono font-bold ${
+                                    kw.position <= 3
+                                      ? "bg-emerald-500/20 text-emerald-400"
+                                      : kw.position <= 10
+                                        ? "bg-emerald-500/10 text-emerald-300"
+                                        : kw.position <= 20
+                                          ? "bg-amber-500/10 text-amber-400"
+                                          : "bg-navy-800 text-navy-300"
+                                  }`}>
+                                    {kw.position}
+                                  </span>
+                                </td>
+                                <td className="px-5 py-3.5 text-sm text-navy-300 font-mono">
+                                  {kw.searchVolume > 0 ? kw.searchVolume.toLocaleString() : "—"}
+                                </td>
+                                <td className="px-5 py-3.5 text-sm text-navy-300 font-mono">
+                                  {kw.cpc > 0 ? `$${kw.cpc.toFixed(2)}` : "—"}
+                                </td>
+                                <td className="px-5 py-3.5">
+                                  <span className="inline-flex text-xs font-mono px-2 py-0.5 rounded-md bg-navy-800 text-navy-300">
+                                    {kw.type}
+                                  </span>
+                                </td>
+                                <td className="px-5 py-3.5 text-sm text-navy-400 font-mono max-w-[200px] truncate">
+                                  {kw.url || "—"}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                      {result.rankedKeywords.totalKeywords > result.rankedKeywords.topKeywords.length && (
+                        <div className="p-4 border-t border-navy-800 text-center">
+                          <p className="text-xs text-navy-500 font-mono">
+                            Showing top {result.rankedKeywords.topKeywords.length} of {result.rankedKeywords.totalKeywords} ranked keywords
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  </>
+                ) : (
+                  <div className="bg-navy-900 border border-navy-800 rounded-xl p-10 text-center">
+                    <div className="inline-flex p-3 rounded-xl bg-navy-800 mb-4">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-6 h-6 text-navy-400">
+                        <path d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                    </div>
+                    <h3 className="font-display font-bold text-lg text-white mb-2">No Keyword Rankings Found</h3>
+                    <p className="text-sm text-navy-400 max-w-md mx-auto">
+                      {result.business.website
+                        ? "This domain doesn't currently rank for any tracked keywords in Google organic results. Building keyword-targeted content is recommended."
+                        : "Provide a website URL when running the audit to check keyword rankings."}
+                    </p>
                   </div>
                 )}
               </div>
