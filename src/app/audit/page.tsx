@@ -491,20 +491,25 @@ export default function AuditPage() {
                         <p className="text-xs font-mono text-navy-400 uppercase mb-1">Total Reviews</p>
                         <p className="text-2xl font-display font-bold text-white">{report.reviews.totalReviews}</p>
                       </div>
-                      <div className="bg-navy-900 border border-navy-800 rounded-xl p-5">
-                        <p className="text-xs font-mono text-navy-400 uppercase mb-1">Reply Rate</p>
-                        <p className="text-2xl font-display font-bold text-white">{Math.round(report.reviews.replyRate * 100)}%</p>
-                        <div className="w-full h-1.5 bg-navy-800 rounded-full mt-1 overflow-hidden">
-                          <div className={`h-full rounded-full ${report.reviews.replyRate >= 0.8 ? "bg-emerald-500" : report.reviews.replyRate >= 0.5 ? "bg-amber-500" : "bg-red-500"}`} style={{ width: `${Math.round(report.reviews.replyRate * 100)}%` }} />
+                      {report.reviews.replyRate > 0 && (
+                        <div className="bg-navy-900 border border-navy-800 rounded-xl p-5">
+                          <p className="text-xs font-mono text-navy-400 uppercase mb-1">Reply Rate</p>
+                          <p className="text-2xl font-display font-bold text-white">{Math.round(report.reviews.replyRate * 100)}%</p>
+                          <div className="w-full h-1.5 bg-navy-800 rounded-full mt-1 overflow-hidden">
+                            <div className={`h-full rounded-full ${report.reviews.replyRate >= 0.8 ? "bg-emerald-500" : report.reviews.replyRate >= 0.5 ? "bg-amber-500" : "bg-red-500"}`} style={{ width: `${Math.round(report.reviews.replyRate * 100)}%` }} />
+                          </div>
                         </div>
-                      </div>
-                      <div className="bg-navy-900 border border-navy-800 rounded-xl p-5">
-                        <p className="text-xs font-mono text-navy-400 uppercase mb-1">Velocity</p>
-                        <p className="text-2xl font-display font-bold text-white">{report.reviews.recentVelocity.toFixed(1)}</p>
-                        <p className="text-[10px] font-mono text-navy-500">reviews/mo</p>
-                      </div>
+                      )}
+                      {report.reviews.recentVelocity > 0 && (
+                        <div className="bg-navy-900 border border-navy-800 rounded-xl p-5">
+                          <p className="text-xs font-mono text-navy-400 uppercase mb-1">Velocity</p>
+                          <p className="text-2xl font-display font-bold text-white">{report.reviews.recentVelocity.toFixed(1)}</p>
+                          <p className="text-[10px] font-mono text-navy-500">reviews/mo</p>
+                        </div>
+                      )}
                     </div>
-                    {/* Rating Distribution */}
+                    {/* Rating Distribution — only show if we have actual distribution data */}
+                    {Object.values(report.reviews.ratingDistribution).some((v) => v > 0) && (
                     <div className="bg-navy-900 border border-navy-800 rounded-xl p-6">
                       <h3 className="font-display font-bold text-lg text-white mb-4">Rating Distribution</h3>
                       <div className="space-y-2">
@@ -524,6 +529,7 @@ export default function AuditPage() {
                         })}
                       </div>
                     </div>
+                    )}
                     {/* Recent Reviews */}
                     {report.reviews.topReviews.length > 0 && (
                       <div className="bg-navy-900 border border-navy-800 rounded-xl p-6">

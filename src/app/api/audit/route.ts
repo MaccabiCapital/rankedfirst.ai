@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 
+// Allow up to 60s for the audit (PSI alone can take 50s)
+export const maxDuration = 60;
+
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 // ─── Types ───────────────────────────────────────────────────────────
