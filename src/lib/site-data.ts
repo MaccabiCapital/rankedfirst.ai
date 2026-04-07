@@ -49,7 +49,9 @@ export const navigation = {
     { name: "Agents", href: "/agents", hasDropdown: true },
     { name: "Industries", href: "/industries", hasDropdown: true },
     { name: "Skills", href: "/skills" },
+    { name: "Tools", href: "/tools" },
     { name: "About", href: "/about" },
+    { name: "Clients", href: "/clients" },
     { name: "Workbench", href: "/workbench" },
   ],
 };
