@@ -1,0 +1,58 @@
+import type { Config } from "tailwindcss";
+
+export default {
+  content: [
+    "./src/pages/**/*.{js,ts,jsx,tsx,mdx}",
+    "./src/components/**/*.{js,ts,jsx,tsx,mdx}",
+    "./src/app/**/*.{js,ts,jsx,tsx,mdx}",
+  ],
+  darkMode: "class",
+  theme: {
+    extend: {
+      colors: {
+        navy: {
+          50: "#f0f3f8",
+          100: "#d9e0ed",
+          200: "#b3c1db",
+          300: "#8da2c9",
+          400: "#6683b7",
+          500: "#4064a5",
+          600: "#334f84",
+          700: "#263b63",
+          800: "#1B2B4A",
+          900: "#0F1D35",
+          950: "#0A1528",
+        },
+        accent: {
+          50: "#eff6ff",
+          100: "#dbeafe",
+          200: "#bfdbfe",
+          300: "#93c5fd",
+          400: "#60a5fa",
+          500: "#3b82f6",
+          600: "#2563eb",
+          700: "#1d4ed8",
+          800: "#1e40af",
+          900: "#1e3a8a",
+        },
+      },
+      fontFamily: {
+        display: ["var(--font-cabinet)", "system-ui", "sans-serif"],
+        body: ["var(--font-satoshi)", "system-ui", "sans-serif"],
+        mono: ["var(--font-jetbrains)", "Consolas", "monospace"],
+      },
+      animation: {
+        "pulse-slow": "pulse 3s ease-in-out infinite",
+        "gradient-shift": "gradient-shift 6s ease-in-out infinite",
+        "ping-slow": "ping 2s ease-out infinite",
+      },
+      keyframes: {
+        "gradient-shift": {
+          "0%, 100%": { backgroundPosition: "0% 50%" },
+          "50%": { backgroundPosition: "100% 50%" },
+        },
+      },
+    },
+  },
+  plugins: [],
+} satisfies Config;
