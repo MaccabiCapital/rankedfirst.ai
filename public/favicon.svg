@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none">
+  <!-- Background circle -->
+  <circle cx="16" cy="16" r="15" fill="#1B2A4A"/>
+
+  <!-- Corner circuit nodes -->
+  <circle cx="7" cy="7" r="1.5" fill="#2563EB" opacity="0.6"/>
+  <circle cx="25" cy="7" r="1.5" fill="#2563EB" opacity="0.6"/>
+
+  <!-- Arrow head pointing up -->
+  <path d="M16 6 L10 14 L14 14 L14 15 L18 15 L18 14 L22 14 Z" fill="#2563EB"/>
+
+  <!-- Arrow shaft -->
+  <rect x="14" y="15" width="4" height="9" rx="1" fill="white"/>
+
+  <!-- Base bar -->
+  <rect x="11" y="24" width="10" height="2" rx="1" fill="white" opacity="0.7"/>
+</svg>

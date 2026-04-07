@@ -11,6 +11,7 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
+  metadataBase: new URL("https://rankedfirst.ai"),
   title: {
     default: "RankedFirst.ai — Local Visibility for the AI Era",
     template: "%s | RankedFirst.ai",
@@ -26,6 +27,9 @@ export const metadata: Metadata = {
     "local AI visibility",
   ],
   authors: [{ name: "RankedFirst.ai" }],
+  alternates: {
+    canonical: "https://rankedfirst.ai",
+  },
   openGraph: {
     type: "website",
     locale: "en_US",
@@ -44,7 +48,28 @@ export const metadata: Metadata = {
   robots: {
     index: true,
     follow: true,
+    googleBot: {
+      index: true,
+      follow: true,
+      "max-snippet": -1,
+      "max-image-preview": "large",
+      "max-video-preview": -1,
+    },
   },
+  icons: {
+    icon: "/favicon.svg",
+  },
+};
+
+const organizationSchema = {
+  "@context": "https://schema.org",
+  "@type": "Organization",
+  name: "RankedFirst.ai",
+  url: "https://rankedfirst.ai",
+  description:
+    "AI-native local SEO agency. Autonomous agents handle GBP optimization, geogrid analysis, citation management, review monitoring, and AI visibility.",
+  email: "hello@rankedfirst.ai",
+  sameAs: [],
 };
 
 export default function RootLayout({
@@ -68,6 +93,13 @@ export default function RootLayout({
         <Header />
         <main className="flex-1">{children}</main>
         <Footer />
+        {/* Organization JSON-LD */}
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{
+            __html: JSON.stringify(organizationSchema),
+          }}
+        />
       </body>
     </html>
   );

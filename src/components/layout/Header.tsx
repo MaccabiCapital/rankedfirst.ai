@@ -2,7 +2,6 @@
 
 import * as React from "react";
 import Link from "next/link";
-import Image from "next/image";
 import { navigation } from "@/lib/site-data";
 import { Button } from "@/components/ui/Button";
 
@@ -86,12 +85,12 @@ function Logo() {
   return (
     <Link href="/" className="flex items-center gap-2.5 shrink-0 group">
       <div className="relative h-8 w-8 rounded-md overflow-hidden ring-1 ring-navy-700 group-hover:ring-accent-600 transition-all duration-200">
-        <Image
-          src="/logo.jpeg"
+        <img
+          src="/logo.svg"
           alt="RankedFirst.ai logo"
-          fill
-          className="object-cover"
-          priority
+          width={32}
+          height={32}
+          className="object-cover w-full h-full"
         />
       </div>
       <span className="font-display font-bold text-lg text-white leading-none">

@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <!-- Background circle -->
+  <circle cx="32" cy="32" r="30" fill="#1B2A4A"/>
+
+  <!-- Circuit node accents (small dots at cardinal corners) -->
+  <circle cx="14" cy="14" r="2.5" fill="#2563EB" opacity="0.6"/>
+  <circle cx="50" cy="14" r="2.5" fill="#2563EB" opacity="0.6"/>
+  <circle cx="14" cy="50" r="2.5" fill="#2563EB" opacity="0.4"/>
+  <circle cx="50" cy="50" r="2.5" fill="#2563EB" opacity="0.4"/>
+
+  <!-- Circuit lines from corners toward center -->
+  <line x1="14" y1="14" x2="22" y2="22" stroke="#2563EB" stroke-width="1" opacity="0.4" stroke-linecap="round"/>
+  <line x1="50" y1="14" x2="42" y2="22" stroke="#2563EB" stroke-width="1" opacity="0.4" stroke-linecap="round"/>
+
+  <!-- Upward arrow / rank-1 mark -->
+  <!-- Arrow shaft (vertical bar of the "1") -->
+  <rect x="29" y="28" width="6" height="16" rx="2" fill="white"/>
+
+  <!-- Arrow head pointing up -->
+  <path d="M32 12 L22 26 L29 26 L29 28 L35 28 L35 26 L42 26 Z" fill="#2563EB"/>
+
+  <!-- Small horizontal serif at bottom of "1" (ranking podium feel) -->
+  <rect x="24" y="44" width="16" height="3" rx="1.5" fill="white" opacity="0.7"/>
+
+  <!-- Location pin dot (subtle, bottom center) -->
+  <circle cx="32" cy="55" r="2" fill="#2563EB" opacity="0.7"/>
+  <line x1="32" y1="47" x2="32" y2="53" stroke="#2563EB" stroke-width="1" opacity="0.4" stroke-linecap="round"/>
+</svg>
