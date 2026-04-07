@@ -35,6 +35,11 @@ async function callDFS(path: string, body: unknown[]): Promise<any> {
     console.error(`[DFS] ${path} error:`, json.status_message);
     return null;
   }
+  // Check task-level errors
+  const task = json.tasks?.[0];
+  if (task && task.status_code !== 20000) {
+    console.warn(`[DFS] ${path} task warning:`, task.status_code, task.status_message);
+  }
   return json;
 }
 
@@ -47,10 +52,12 @@ async function safeDFS(path: string, body: unknown[]): Promise<any> {
   }
 }
 
-// Helper to extract first result item from DFS response
 function dfsItems(response: any): any[] {
-  if (!response?.tasks?.[0]?.result?.[0]?.items) return [];
-  return response.tasks[0].result[0].items;
+  try {
+    return response?.tasks?.[0]?.result?.[0]?.items ?? [];
+  } catch {
+    return [];
+  }
 }
 
 function dfsFirstItem(response: any): any {
@@ -58,8 +65,63 @@ function dfsFirstItem(response: any): any {
   return items.length > 0 ? items[0] : null;
 }
 
-function dfsResult(response: any): any {
-  return response?.tasks?.[0]?.result?.[0] ?? null;
+// ─── Location Resolution ─────────────────────────────────────────────
+// DataForSEO requires precise location_name or location_code
+// We try to resolve the user's location string to a location_code
+async function resolveLocation(location: string): Promise<{ code: number | null; name: string }> {
+  try {
+    // First try the locations endpoint to find a match
+    const res = await fetch(`${DFS_BASE}/serp/google/locations`, {
+      method: "GET",
+      headers: { Authorization: getDFSAuth() },
+      signal: AbortSignal.timeout(10000),
+    });
+    const json = await res.json();
+    const locations: any[] = json.tasks?.[0]?.result ?? [];
+
+    // Normalize user input
+    const normalized = location.toLowerCase().replace(/\s+/g, " ").trim();
+    const parts = normalized.split(",").map((p) => p.trim());
+    const city = parts[0] ?? "";
+
+    // Try exact match first
+    for (const loc of locations) {
+      const locName = (loc.location_name ?? "").toLowerCase();
+      if (locName === normalized) {
+        return { code: loc.location_code, name: loc.location_name };
+      }
+    }
+
+    // Try matching by city + country/state
+    const matches = locations.filter((loc: any) => {
+      const locName = (loc.location_name ?? "").toLowerCase();
+      return locName.startsWith(city + ",");
+    });
+
+    if (matches.length === 1) {
+      return { code: matches[0].location_code, name: matches[0].location_name };
+    }
+
+    // If multiple matches, try to find the best one using more parts
+    if (matches.length > 1 && parts.length > 1) {
+      for (const m of matches) {
+        const locName = (m.location_name ?? "").toLowerCase();
+        const hasAllParts = parts.every((p) => locName.includes(p));
+        if (hasAllParts) {
+          return { code: m.location_code, name: m.location_name };
+        }
+      }
+      // Return first match as fallback
+      return { code: matches[0].location_code, name: matches[0].location_name };
+    }
+
+    // No match found — use the raw string
+    console.warn(`[audit] Could not resolve location "${location}" to a code`);
+    return { code: null, name: location };
+  } catch (e) {
+    console.error("[audit] Location resolution failed:", e);
+    return { code: null, name: location };
+  }
 }
 
 // ─── LocalSEOData Client (fallback) ─────────────────────────────────
@@ -95,17 +157,7 @@ function extractLSEOData(response: any): any {
   return response.data ?? response.audit ?? response.profile ?? response;
 }
 
-// ─── Location Helper ─────────────────────────────────────────────────
-// DataForSEO needs location_name in format "City,State,Country"
-// We'll try to use the user's location string directly
-function formatDFSLocation(location: string): string {
-  // If already contains comma-separated parts, use as-is
-  if (location.includes(",")) return location;
-  // Otherwise append country context
-  return location;
-}
-
-// ─── Scoring Logic ───────────────────────────────────────────────────
+// ─── Scoring ─────────────────────────────────────────────────────────
 interface DimensionScore {
   label: string;
   score: number;
@@ -119,17 +171,61 @@ function clampScore(n: number): number {
   return Math.max(0, Math.min(100, Math.round(n)));
 }
 
+// ─── Business Finder ─────────────────────────────────────────────────
+// Find the target business within Maps SERP results
+interface BusinessMatch {
+  item: any;
+  rank: number;
+  found: boolean;
+}
+
+function findBusinessInMaps(mapsItems: any[], businessName: string): BusinessMatch {
+  const normalized = businessName.toLowerCase().trim();
+  const words = normalized.split(/\s+/).filter((w) => w.length > 2);
+
+  for (const item of mapsItems) {
+    const title = (item.title ?? "").toLowerCase().trim();
+
+    // Exact or near-exact match
+    if (
+      title === normalized ||
+      title.includes(normalized) ||
+      normalized.includes(title) ||
+      levenshteinSimilarity(title, normalized) > 0.6
+    ) {
+      return { item, rank: item.rank_group ?? 0, found: true };
+    }
+
+    // Word overlap check — require 75%+ of significant words to match
+    const titleWords = title.split(/\s+/);
+    const overlap = words.filter((w) => titleWords.some((tw: string) => tw === w || (tw.length > 4 && tw.includes(w)) || (w.length > 4 && w.includes(tw))));
+    if (overlap.length >= 3 && overlap.length >= words.length * 0.75) {
+      return { item, rank: item.rank_group ?? 0, found: true };
+    }
+
+    // Domain match if website_url was provided and business has a domain
+    const domain = item.domain ?? "";
+    if (domain && normalized.replace(/\s+/g, "").includes(domain.replace("www.", "").split(".")[0])) {
+      return { item, rank: item.rank_group ?? 0, found: true };
+    }
+  }
+
+  return { item: null, rank: 0, found: false };
+}
+
+// ─── Scorecard Builder ───────────────────────────────────────────────
 function buildScorecard(
-  gbpInfo: any,          // DataForSEO My Business Info
-  onpageData: any,       // DataForSEO Instant Pages
-  mapsData: any,         // DataForSEO Maps SERP
-  localAuditRaw: any,    // LocalSEOData local-audit (fallback)
-  citationsRaw: any,     // LocalSEOData citations
-  reviewsRaw: any,       // LocalSEOData reviews
-  aiVisRaw: any,         // LocalSEOData AI visibility
-  competitorGapRaw: any, // LocalSEOData competitor-gap
-  businessName: string
+  businessMatch: BusinessMatch,
+  mapsItems: any[],
+  onpageData: any,
+  localAuditRaw: any,
+  citationsRaw: any,
+  reviewsRaw: any,
+  aiVisRaw: any,
+  competitorGapRaw: any,
+  websiteUrl: string | undefined
 ) {
+  const biz = businessMatch.item;
   const local = extractLSEOData(localAuditRaw);
   const citations = extractLSEOData(citationsRaw);
   const reviews = extractLSEOData(reviewsRaw);
@@ -138,34 +234,31 @@ function buildScorecard(
 
   const dimensions: DimensionScore[] = [];
 
-  // ─── 1. Local Pack Ranking (from DataForSEO Maps SERP) ──────────
-  const mapsItems = dfsItems(mapsData) ?? [];
-  let packPos: number | null = null;
-  const normalizedBiz = businessName.toLowerCase().trim();
+  // Rating and review count from Maps/GBP data
+  const rating = biz?.rating?.value ?? local?.rating?.value ?? 0;
+  const reviewsCount = biz?.rating?.votes_count ?? local?.reviews_count ?? local?.rating?.votes_count ?? 0;
 
-  for (const item of mapsItems) {
-    const title = (item.title ?? "").toLowerCase().trim();
-    if (
-      title.includes(normalizedBiz) ||
-      normalizedBiz.includes(title) ||
-      levenshteinSimilarity(title, normalizedBiz) > 0.6
-    ) {
-      packPos = item.rank_group ?? item.rank_absolute ?? null;
-      break;
+  // ─── 1. Local Pack Ranking ──────────────────────────────────────
+  let rankScore = 0;
+  let rankDetail = "";
+
+  if (businessMatch.found && businessMatch.rank > 0) {
+    rankScore = clampScore(Math.max(100 - (businessMatch.rank - 1) * 15, 10));
+    rankDetail = `Position #${businessMatch.rank} in local pack`;
+  } else if (!businessMatch.found && mapsItems.length > 0) {
+    // Business was NOT found in maps results — this is a real finding
+    rankScore = 0;
+    rankDetail = "Not found in local map pack — critical visibility gap";
+  } else {
+    const packPos = local?.local_pack_position;
+    if (packPos && packPos > 0) {
+      rankScore = clampScore(Math.max(100 - (packPos - 1) * 15, 10));
+      rankDetail = `Position #${packPos} in local pack`;
+    } else {
+      rankDetail = "Not found in local pack";
     }
   }
 
-  // Fallback to LocalSEOData
-  if (!packPos) {
-    packPos = local?.local_pack_position ?? null;
-  }
-
-  let rankScore = 0;
-  let rankDetail = "Not found in local pack";
-  if (packPos && packPos > 0) {
-    rankScore = clampScore(Math.max(100 - (packPos - 1) * 15, 10));
-    rankDetail = `Position #${packPos} in local pack`;
-  }
   dimensions.push({
     label: "Local Pack Ranking",
     score: rankScore,
@@ -175,54 +268,39 @@ function buildScorecard(
     icon: "ranking",
   });
 
-  // ─── 2. GBP Profile Completeness (from DataForSEO My Business Info) ─
+  // ─── 2. GBP Profile Completeness ───────────────────────────────
   let profileScore = 0;
-  let profileDetail = "Could not retrieve profile";
-  let rating = 0;
-  let reviewsCount = 0;
+  let profileDetail = "";
 
-  if (gbpInfo) {
-    const item = dfsFirstItem(gbpInfo);
-    if (item) {
-      rating = item.rating?.value ?? 0;
-      reviewsCount = item.rating?.votes_count ?? 0;
-
-      // Calculate completeness from available fields
-      const fields = [
-        item.title,
-        item.description,
-        item.address,
-        item.phone,
-        item.url,
-        item.category,
-        item.work_time?.work_hours?.timetable,
-        item.total_photos && item.total_photos > 0,
-        item.attributes?.available_attributes,
-        item.is_claimed,
-      ];
-      const filled = fields.filter(Boolean).length;
-      profileScore = clampScore(Math.round((filled / fields.length) * 100));
-      profileDetail = `${profileScore}% complete`;
-      if (rating) {
-        profileDetail += `, ${rating} stars, ${reviewsCount} reviews`;
-      }
-      if (item.is_claimed === false) {
-        profileDetail += " (unclaimed)";
-        profileScore = Math.max(profileScore - 15, 0);
-      }
+  if (biz) {
+    // We have Maps data for this business — calculate profile completeness
+    const fields = [
+      biz.title,
+      biz.address,
+      biz.phone,
+      biz.domain || biz.url,
+      biz.category,
+      biz.work_time?.timetable ?? biz.work_time?.work_hours?.timetable,
+      biz.total_photos && biz.total_photos > 0,
+      biz.is_claimed,
+      biz.rating?.votes_count && biz.rating.votes_count > 0,
+      biz.additional_categories && biz.additional_categories.length > 0,
+    ];
+    const filled = fields.filter(Boolean).length;
+    profileScore = clampScore(Math.round((filled / fields.length) * 100));
+    profileDetail = `${profileScore}% complete`;
+    if (rating) profileDetail += `, ${rating} stars, ${reviewsCount} reviews`;
+    if (biz.is_claimed === false) {
+      profileDetail += " (unclaimed)";
+      profileScore = Math.max(profileScore - 15, 0);
     }
-  }
-
-  // Fallback to LocalSEOData
-  if (profileScore === 0 && local) {
-    const profComplete = local.profile_completeness ?? 0;
-    rating = local.rating?.value ?? rating;
-    reviewsCount = local.reviews_count ?? local.rating?.votes_count ?? reviewsCount;
-    profileScore = profComplete;
-    if (profComplete) {
-      profileDetail = `${profComplete}% complete`;
-      if (rating) profileDetail += `, ${rating} stars, ${reviewsCount} reviews`;
-    }
+  } else if (local?.profile_completeness) {
+    profileScore = local.profile_completeness;
+    profileDetail = `${profileScore}% complete`;
+    if (rating) profileDetail += `, ${rating} stars, ${reviewsCount} reviews`;
+  } else {
+    // Business has no GBP at all
+    profileDetail = "No Google Business Profile found — create one to appear in local search";
   }
 
   dimensions.push({
@@ -234,29 +312,35 @@ function buildScorecard(
     icon: "profile",
   });
 
-  // ─── 3. Reviews & Reputation (DataForSEO GBP rating + LocalSEOData velocity) ─
+  // ─── 3. Reviews & Reputation ────────────────────────────────────
   const revVelocity = local?.review_velocity ?? reviews?.reviews_per_month ?? 0;
   const replyRate = reviews?.reply_rate ?? 0;
   const currentRating = rating || reviews?.current_rating || 0;
 
   let revScore = 0;
-  if (currentRating > 0) {
-    revScore += (currentRating / 5) * 40;
-  }
+  if (currentRating > 0) revScore += (currentRating / 5) * 40;
   revScore += replyRate * 30;
   revScore += Math.min(revVelocity / 20, 1) * 30;
+
+  // If we have rating from Maps but no velocity data, estimate score from rating + count
+  if (currentRating > 0 && revVelocity === 0 && replyRate === 0) {
+    const countBonus = Math.min(reviewsCount / 100, 1) * 30; // up to 30pts for 100+ reviews
+    revScore = (currentRating / 5) * 40 + countBonus;
+  }
   revScore = clampScore(revScore);
 
   let revDetail = "";
-  if (currentRating > 0 || revVelocity > 0) {
+  if (currentRating > 0 || reviewsCount > 0) {
     const parts: string[] = [];
     if (currentRating > 0) parts.push(`${currentRating} stars`);
     if (reviewsCount > 0) parts.push(`${reviewsCount} reviews`);
     if (revVelocity > 0) parts.push(`${revVelocity.toFixed(1)}/mo velocity`);
     if (replyRate > 0) parts.push(`${Math.round(replyRate * 100)}% reply rate`);
     revDetail = parts.join(", ");
+  } else if (!biz) {
+    revDetail = "No Google reviews — create a GBP to start collecting reviews";
   } else {
-    revDetail = "No review data available";
+    revDetail = "No reviews yet — request reviews from customers";
   }
 
   dimensions.push({
@@ -268,7 +352,7 @@ function buildScorecard(
     icon: "reviews",
   });
 
-  // ─── 4. Citation Consistency (LocalSEOData) ────────────────────────
+  // ─── 4. Citation Consistency ────────────────────────────────────
   const citScore = citations?.citation_score ?? citationsRaw?.citation_score ?? 0;
   const citTotal = citations?.total_directories ?? citationsRaw?.total_directories ?? 0;
   const citConsistent = citations?.consistent ?? citationsRaw?.consistent ?? 0;
@@ -278,52 +362,52 @@ function buildScorecard(
     weight: 0.12,
     detail: citScore
       ? `${citScore}/100 — ${citConsistent}/${citTotal} directories consistent`
-      : "Citation audit unavailable",
+      : "Citation audit unavailable — will check when credits refresh",
     weighted: Math.round(clampScore(citScore) * 0.12),
     icon: "citations",
   });
 
-  // ─── 5. On-Page SEO (DataForSEO Instant Pages) ────────────────────
+  // ─── 5. On-Page SEO ────────────────────────────────────────────
   let onpageScore = 0;
-  let onpageDetail = "No website URL provided";
+  let onpageDetail = "";
+  const onpageItem = dfsFirstItem(onpageData);
 
-  if (onpageData) {
-    const item = dfsFirstItem(onpageData);
-    if (item) {
-      onpageScore = item.onpage_score ?? 0;
-      const lcp = item.page_timing?.largest_contentful_paint;
-      const cls = item.meta?.cumulative_layout_shift;
-      const fid = item.page_timing?.first_input_delay;
-      const checks = item.checks ?? {};
+  if (onpageItem && onpageItem.onpage_score) {
+    onpageScore = onpageItem.onpage_score;
+
+    // Check if the page was actually accessible
+    const pageTitle = onpageItem.meta?.title ?? "";
+    const statusCode = onpageItem.status_code ?? 200;
+
+    if (statusCode >= 400 || pageTitle.toLowerCase().includes("forbidden") || pageTitle.toLowerCase().includes("denied")) {
+      onpageDetail = `Website returned ${statusCode >= 400 ? statusCode : "403 Forbidden"} — crawler blocked. Technical score: ${Math.round(onpageScore)}/100`;
+      // Penalize for blocking crawlers (also blocks search engines)
+      onpageScore = Math.min(onpageScore, 50);
+    } else {
+      const lcp = onpageItem.page_timing?.largest_contentful_paint;
+      const cls = onpageItem.meta?.cumulative_layout_shift;
 
       const issueList: string[] = [];
+      const checks = onpageItem.checks ?? {};
       if (checks.no_h1_tag) issueList.push("missing H1");
       if (checks.no_description) issueList.push("no meta description");
       if (checks.no_title) issueList.push("no title tag");
-      if (checks.high_loading_time) issueList.push("slow load time");
+      if (checks.high_loading_time) issueList.push("slow load");
       if (checks.is_http) issueList.push("not HTTPS");
       if (checks.no_favicon) issueList.push("no favicon");
       if (checks.low_content_rate) issueList.push("thin content");
       if (checks.title_too_long) issueList.push("title too long");
-      if (checks.no_image_alt) issueList.push("missing image alt");
+      if (checks.no_image_alt) issueList.push("missing alt text");
 
       onpageDetail = `Score ${Math.round(onpageScore)}/100`;
-      if (lcp !== undefined) onpageDetail += `, LCP ${(lcp / 1000).toFixed(1)}s`;
+      if (lcp !== undefined && lcp > 0) onpageDetail += `, LCP ${(lcp / 1000).toFixed(1)}s`;
       if (cls !== undefined) onpageDetail += `, CLS ${cls.toFixed(3)}`;
-      if (fid !== undefined && fid > 0) onpageDetail += `, FID ${fid}ms`;
-      if (issueList.length > 0) {
-        onpageDetail += ` — Issues: ${issueList.join(", ")}`;
-      }
+      if (issueList.length > 0) onpageDetail += ` — ${issueList.join(", ")}`;
     }
-  }
-
-  // Fallback to LocalSEOData page-audit
-  if (onpageScore === 0 && local) {
-    const lseoPageScore = extractLSEOData(localAuditRaw)?.onpage_score;
-    if (lseoPageScore) {
-      onpageScore = lseoPageScore;
-      onpageDetail = `Score ${lseoPageScore}/100 (via LocalSEO)`;
-    }
+  } else if (websiteUrl) {
+    onpageDetail = "Could not analyze website";
+  } else {
+    onpageDetail = "No website URL provided";
   }
 
   dimensions.push({
@@ -335,7 +419,7 @@ function buildScorecard(
     icon: "onpage",
   });
 
-  // ─── 6. AI Visibility (LocalSEOData) ──────────────────────────────
+  // ─── 6. AI Visibility ──────────────────────────────────────────
   const aiMentions = aiVis?.total_mentions ?? 0;
   const aiImpressions = aiVis?.total_impressions ?? 0;
   const aiScore = clampScore(Math.min(aiMentions * 10, 100));
@@ -345,29 +429,20 @@ function buildScorecard(
     weight: 0.12,
     detail: aiMentions
       ? `${aiMentions} AI mentions, ~${aiImpressions} impressions`
-      : "AI visibility check unavailable",
+      : "AI visibility check unavailable — will check when credits refresh",
     weighted: Math.round(aiScore * 0.12),
     icon: "ai",
   });
 
-  // ─── 7. Competitive Position (DataForSEO Maps + LocalSEOData) ─────
-  // Use maps results as competitors (other businesses in local pack)
-  const mapsCompetitors = mapsItems.filter((item: any) => {
-    const title = (item.title ?? "").toLowerCase().trim();
-    return !(
-      title.includes(normalizedBiz) ||
-      normalizedBiz.includes(title) ||
-      levenshteinSimilarity(title, normalizedBiz) > 0.6
-    );
-  });
-
+  // ─── 7. Competitive Position ────────────────────────────────────
+  const competitors = mapsItems.filter((item: any) => item !== biz);
   const lseoCompetitors = local?.competitors ?? gap?.competitors ?? [];
-  const allCompetitors = mapsCompetitors.length > 0 ? mapsCompetitors : lseoCompetitors;
+  const allCompetitors = competitors.length > 0 ? competitors : lseoCompetitors;
 
   let compScore = 50;
   let compDetail = "Competitor data unavailable";
 
-  if (allCompetitors.length > 0) {
+  if (allCompetitors.length > 0 && biz) {
     const avgCompReviews =
       allCompetitors.reduce(
         (s: number, c: any) =>
@@ -376,22 +451,32 @@ function buildScorecard(
       ) / allCompetitors.length;
     const avgCompRating =
       allCompetitors.reduce(
-        (s: number, c: any) =>
-          s + ((c.rating?.value ?? c.rating ?? 0) as number),
+        (s: number, c: any) => s + ((c.rating?.value ?? c.rating ?? 0) as number),
         0
       ) / allCompetitors.length;
 
-    const bizReviews = reviewsCount || gap?.business?.reviews || 0;
+    const bizReviews = reviewsCount || 0;
 
     if (avgCompReviews > 0 && bizReviews > 0) {
       compScore = clampScore(
         Math.round(
-          (bizReviews / avgCompReviews) * 60 +
-            (currentRating / (avgCompRating || 5)) * 40
+          (bizReviews / avgCompReviews) * 60 + (currentRating / (avgCompRating || 5)) * 40
         )
       );
+    } else if (bizReviews === 0 && avgCompReviews > 0) {
+      compScore = clampScore(15); // business has no reviews but competitors do
     }
-    compDetail = `${reviewsCount} reviews vs avg ${Math.round(avgCompReviews)} (${allCompetitors.length} competitors)`;
+    compDetail = `${bizReviews} reviews vs avg ${Math.round(avgCompReviews)} (${allCompetitors.length} competitors)`;
+  } else if (!biz && allCompetitors.length > 0) {
+    // Business not found at all — show what competitors look like
+    const avgRev =
+      allCompetitors.reduce(
+        (s: number, c: any) =>
+          s + ((c.rating?.votes_count ?? c.reviews_count ?? 0) as number),
+        0
+      ) / allCompetitors.length;
+    compScore = 5;
+    compDetail = `Not in local results — competitors avg ${Math.round(avgRev)} reviews`;
   } else if (local?.recommendations?.length) {
     compScore = clampScore(100 - local.recommendations.length * 15);
     compDetail = `${local.recommendations.length} improvement areas identified`;
@@ -406,10 +491,10 @@ function buildScorecard(
     icon: "competitive",
   });
 
-  // ─── 8. Overall Health ─────────────────────────────────────────────
+  // ─── 8. Overall Health ──────────────────────────────────────────
   const healthScore = local?.health_score ?? 0;
   let finalHealthScore = healthScore;
-  let healthDetail = "Health score unavailable";
+  let healthDetail = "";
 
   if (!healthScore) {
     const nonHealthDims = dimensions.filter((d) => d.icon !== "health");
@@ -418,7 +503,11 @@ function buildScorecard(
       finalHealthScore = clampScore(
         Math.round(nonZero.reduce((s, d) => s + d.score, 0) / nonZero.length)
       );
-      healthDetail = `Computed from ${nonZero.length} available dimensions`;
+      healthDetail = `Computed from ${nonZero.length} active dimensions`;
+    } else {
+      // All dimensions are 0 — business essentially invisible online
+      finalHealthScore = 5;
+      healthDetail = "Very limited online presence detected";
     }
   } else {
     healthDetail = `Local SEO health: ${healthScore}/100`;
@@ -438,188 +527,120 @@ function buildScorecard(
   return { totalScore, dimensions };
 }
 
-// ─── Gap Analysis & Action Plan ──────────────────────────────────────
+// ─── Gap Analysis ────────────────────────────────────────────────────
 function buildGapAnalysis(
-  gbpInfo: any,
+  businessMatch: BusinessMatch,
+  mapsItems: any[],
   onpageData: any,
-  mapsData: any,
   localAuditRaw: any,
   citationsRaw: any,
   reviewsRaw: any,
   aiVisRaw: any,
   competitorGapRaw: any,
-  businessName: string
+  websiteUrl: string | undefined
 ) {
+  const biz = businessMatch.item;
   const local = extractLSEOData(localAuditRaw);
   const citations = extractLSEOData(citationsRaw);
   const reviews = extractLSEOData(reviewsRaw);
   const aiVis = extractLSEOData(aiVisRaw);
   const gap = extractLSEOData(competitorGapRaw);
   const onpageItem = dfsFirstItem(onpageData);
-  const gbpItem = dfsFirstItem(gbpInfo);
 
   const quickWins: Array<{ action: string; impact: string; effort: string }> = [];
   const strategic: Array<{ action: string; impact: string; timeline: string }> = [];
 
-  // GBP Profile quick wins from DataForSEO
-  if (gbpItem) {
-    if (!gbpItem.description) {
+  // ─── No GBP at all — most critical ─────────────────────────────
+  if (!biz) {
+    quickWins.push({
+      action: "Create and verify a Google Business Profile — you currently have no GBP listing",
+      impact: "Critical — without a GBP you cannot appear in Google Maps or local pack",
+      effort: "1–2 hours + verification (up to 14 days)",
+    });
+  } else {
+    // GBP exists — check for gaps
+    if (biz.is_claimed === false) {
       quickWins.push({
-        action: "Add a business description to your Google Business Profile",
-        impact: "High — GBP completeness is a top-3 ranking factor",
-        effort: "30 minutes",
+        action: "Claim and verify your Google Business Profile",
+        impact: "Critical — unclaimed profiles lose ranking signals and can be edited by anyone",
+        effort: "1 hour + verification time",
       });
     }
-    if (!gbpItem.total_photos || gbpItem.total_photos < 10) {
+    if (!biz.total_photos || biz.total_photos < 10) {
       quickWins.push({
-        action: `Add more photos to GBP (currently ${gbpItem.total_photos ?? 0}) — aim for 20+`,
+        action: `Add more photos to GBP (currently ${biz.total_photos ?? 0}) — aim for 20+`,
         impact: "High — businesses with 100+ photos get 520% more calls",
         effort: "1–2 hours",
       });
     }
-    if (gbpItem.is_claimed === false) {
-      quickWins.push({
-        action: "Claim and verify your Google Business Profile",
-        impact: "Critical — unclaimed profiles cannot be optimized",
-        effort: "1 hour + verification time",
-      });
-    }
-    if (!gbpItem.work_time?.work_hours?.timetable) {
+    if (!biz.work_time?.timetable && !biz.work_time?.work_hours?.timetable) {
       quickWins.push({
         action: "Add business hours to your Google Business Profile",
-        impact: "High — Google penalizes profiles with missing hours",
+        impact: "High — missing hours reduce profile completeness score",
         effort: "15 minutes",
       });
     }
-    if (!gbpItem.attributes?.available_attributes || Object.keys(gbpItem.attributes.available_attributes).length < 3) {
+    const reviewsCount = biz.rating?.votes_count ?? 0;
+    if (reviewsCount < 20) {
       quickWins.push({
-        action: "Add service attributes to your GBP (WiFi, accessibility, payment methods, etc.)",
-        impact: "Medium — helps match specific user searches",
-        effort: "30 minutes",
+        action: `Grow your review count (currently ${reviewsCount}) — implement a review request workflow`,
+        impact: "High — review count and velocity are #1 local ranking factors",
+        effort: "Setup: 2 hours, then ongoing",
       });
     }
   }
 
-  // On-page SEO issues from DataForSEO
+  // ─── On-page issues from DataForSEO ─────────────────────────────
   if (onpageItem) {
     const checks = onpageItem.checks ?? {};
-    if (checks.no_h1_tag) {
-      quickWins.push({
-        action: "Add an H1 tag to your homepage",
-        impact: "High — H1 is a primary on-page ranking signal",
-        effort: "15 minutes",
-      });
-    }
-    if (checks.no_description) {
-      quickWins.push({
-        action: "Add a meta description to your homepage",
-        impact: "Medium — improves click-through rate from SERPs",
-        effort: "15 minutes",
-      });
-    }
-    if (checks.is_http) {
-      quickWins.push({
-        action: "Migrate your website to HTTPS",
-        impact: "Critical — HTTP sites are penalized in rankings",
-        effort: "2–4 hours",
-      });
-    }
-    if (checks.high_loading_time) {
-      strategic.push({
-        action: "Improve page load speed — optimize images, enable caching, minimize JS",
-        impact: "High — page speed is a Core Web Vital ranking factor",
-        timeline: "1–2 weeks",
-      });
-    }
-    if (checks.low_content_rate) {
-      strategic.push({
-        action: "Add more text content to your homepage — aim for 500+ words",
-        impact: "Medium — thin content pages rank poorly",
-        timeline: "1 week",
-      });
-    }
-    if (checks.no_image_alt) {
-      quickWins.push({
-        action: "Add alt text to all images on your website",
-        impact: "Medium — improves accessibility and image search rankings",
-        effort: "1 hour",
-      });
-    }
+    const pageTitle = onpageItem.meta?.title ?? "";
 
-    // Schema markup check
-    const schemas = onpageItem.meta?.social_media_tags ?? {};
-    const hasLocalBusiness = Object.values(schemas).some(
-      (v: any) => typeof v === "string" && v.includes("LocalBusiness")
-    );
-    if (!hasLocalBusiness) {
+    if (pageTitle.toLowerCase().includes("forbidden") || pageTitle.toLowerCase().includes("denied")) {
       quickWins.push({
-        action: "Add LocalBusiness schema markup to your website",
-        impact: "Medium — helps Google understand your business entity",
-        effort: "1 hour",
+        action: "Fix website crawler blocking — your site returns 403 Forbidden to search engines",
+        impact: "Critical — if Googlebot is blocked, your pages won't be indexed",
+        effort: "1–2 hours (check .htaccess / firewall rules)",
       });
+    } else {
+      if (checks.no_h1_tag) quickWins.push({ action: "Add an H1 tag to your homepage", impact: "High — primary on-page ranking signal", effort: "15 minutes" });
+      if (checks.no_description) quickWins.push({ action: "Add a meta description", impact: "Medium — improves click-through rate", effort: "15 minutes" });
+      if (checks.is_http) quickWins.push({ action: "Migrate to HTTPS", impact: "Critical — HTTP sites are penalized", effort: "2–4 hours" });
+      if (checks.high_loading_time) strategic.push({ action: "Improve page load speed — optimize images, enable caching", impact: "High — Core Web Vital factor", timeline: "1–2 weeks" });
+      if (checks.low_content_rate) strategic.push({ action: "Add more text content (aim for 500+ words)", impact: "Medium — thin content ranks poorly", timeline: "1 week" });
+      if (checks.no_image_alt) quickWins.push({ action: "Add alt text to all images", impact: "Medium — improves accessibility + image search", effort: "1 hour" });
     }
+  } else if (websiteUrl) {
+    strategic.push({
+      action: "Ensure your website is accessible to search engine crawlers",
+      impact: "High — if search engines can't reach your site, it won't rank",
+      timeline: "Immediate",
+    });
+  } else if (!websiteUrl) {
+    quickWins.push({
+      action: "Create a website and link it to your Google Business Profile",
+      impact: "High — businesses with websites rank significantly higher in local search",
+      effort: "Days to weeks depending on complexity",
+    });
   }
 
-  // LocalSEOData recommendations
+  // ─── LocalSEOData recommendations ───────────────────────────────
   const recs = local?.recommendations ?? [];
   for (const rec of recs) {
     const recLower = (rec as string).toLowerCase();
     if (recLower.includes("review") || recLower.includes("photo") || recLower.includes("post")) {
-      quickWins.push({
-        action: rec,
-        impact: "High — directly affects local ranking signals",
-        effort: "Ongoing, 30 min/week",
-      });
+      quickWins.push({ action: rec, impact: "High — directly affects local ranking signals", effort: "Ongoing, 30 min/week" });
     } else if (recLower.includes("profile") || recLower.includes("gbp") || recLower.includes("optimize")) {
-      quickWins.push({
-        action: rec,
-        impact: "High — GBP completeness is a top-3 ranking factor",
-        effort: "1–2 hours",
-      });
+      quickWins.push({ action: rec, impact: "High — GBP completeness is a top-3 factor", effort: "1–2 hours" });
     } else {
-      strategic.push({
-        action: rec,
-        impact: "Medium — builds long-term visibility",
-        timeline: "1–3 months",
-      });
+      strategic.push({ action: rec, impact: "Medium — builds long-term visibility", timeline: "1–3 months" });
     }
-  }
-
-  // Local pack ranking issues
-  const mapsItems = dfsItems(mapsData) ?? [];
-  const normalizedBiz = businessName.toLowerCase().trim();
-  const inPack = mapsItems.some((item: any) => {
-    const title = (item.title ?? "").toLowerCase().trim();
-    return (
-      title.includes(normalizedBiz) ||
-      normalizedBiz.includes(title) ||
-      levenshteinSimilarity(title, normalizedBiz) > 0.6
-    );
-  });
-
-  if (!inPack && !local?.local_pack_position) {
-    strategic.push({
-      action: "Build local pack visibility through GBP optimization, reviews, and citation building",
-      impact: "Critical — you are not appearing in the local 3-pack",
-      timeline: "2–4 months",
-    });
-  }
-
-  // Review velocity gap
-  const revVelocity = local?.review_velocity ?? reviews?.reviews_per_month ?? 0;
-  if (revVelocity < 5) {
-    quickWins.push({
-      action: `Increase review velocity from ${revVelocity.toFixed(1)}/mo — implement automated review request workflow`,
-      impact: "High — review count is the #1 local ranking factor",
-      effort: "Setup: 2 hours, then automated",
-    });
   }
 
   // Citation issues
   const citIssues = citations?.issues ?? citationsRaw?.issues ?? [];
   if (citIssues.length > 0) {
     quickWins.push({
-      action: `Fix ${citIssues.length} citation inconsistencies (${citIssues.slice(0, 3).map((i: any) => i.directory).join(", ")})`,
+      action: `Fix ${citIssues.length} citation inconsistencies`,
       impact: "High — NAP consistency directly affects local rankings",
       effort: "1–2 hours",
     });
@@ -639,13 +660,13 @@ function buildGapAnalysis(
   const aiMentions = aiVis?.total_mentions ?? 0;
   if (aiMentions < 5) {
     strategic.push({
-      action: "Build AI visibility through entity-optimized content and authoritative citations",
-      impact: "High — AI search is growing 40% YoY, early movers gain advantage",
+      action: "Build AI visibility through entity-optimized content",
+      impact: "High — AI search growing 40% YoY",
       timeline: "3–6 months",
     });
   }
 
-  // Competitor gap items from LocalSEOData
+  // Competitor gap items
   const gaps = gap?.gaps ?? [];
   for (const g of gaps) {
     const gLower = (g as string).toLowerCase();
@@ -656,39 +677,32 @@ function buildGapAnalysis(
     }
   }
 
-  // Competitor insights — merge DataForSEO maps + LocalSEOData
-  const mapCompetitors = mapsItems
-    .filter((item: any) => {
-      const title = (item.title ?? "").toLowerCase().trim();
-      return !(
-        title.includes(normalizedBiz) ||
-        normalizedBiz.includes(title) ||
-        levenshteinSimilarity(title, normalizedBiz) > 0.6
-      );
-    })
-    .slice(0, 5)
-    .map((c: any) => ({
-      name: c.title ?? "Unknown",
-      rating: c.rating?.value ?? 0,
-      reviews: c.rating?.votes_count ?? 0,
-      advantages: [],
-      rank: c.rank_group ?? 0,
-    }));
+  // ─── Competitor insights from Maps ──────────────────────────────
+  const competitors = mapsItems.filter((item: any) => item !== biz);
+  const competitorInsights = competitors.slice(0, 5).map((c: any) => ({
+    name: c.title ?? "Unknown",
+    rating: c.rating?.value ?? 0,
+    reviews: c.rating?.votes_count ?? 0,
+    advantages: [] as string[],
+    rank: c.rank_group ?? 0,
+  }));
 
-  const lseoCompetitorInsights = (gap?.competitors ?? local?.competitors ?? [])
-    .slice(0, 5)
-    .map((c: any) => ({
-      name: c.name ?? c.business_name ?? "Unknown",
-      rating: c.rating ?? 0,
-      reviews: c.reviews_count ?? c.reviews ?? 0,
-      advantages: c.advantages ?? [],
-      rank: c.local_pack_rank ?? c.position ?? 0,
-    }));
-
-  const competitorInsights = mapCompetitors.length > 0 ? mapCompetitors : lseoCompetitorInsights;
+  // Merge LocalSEOData competitor insights if Maps didn't have enough
+  if (competitorInsights.length === 0) {
+    const lseoComps = (gap?.competitors ?? local?.competitors ?? []).slice(0, 5);
+    for (const c of lseoComps) {
+      competitorInsights.push({
+        name: c.name ?? c.business_name ?? "Unknown",
+        rating: c.rating ?? 0,
+        reviews: c.reviews_count ?? c.reviews ?? 0,
+        advantages: c.advantages ?? [],
+        rank: c.local_pack_rank ?? c.position ?? 0,
+      });
+    }
+  }
 
   return {
-    quickWins: dedupeActions(quickWins).slice(0, 8),
+    quickWins: dedupeActions(quickWins).slice(0, 10),
     strategic: dedupeActions(strategic).slice(0, 6),
     competitorInsights,
     gaps,
@@ -701,22 +715,13 @@ function levenshteinSimilarity(a: string, b: string): number {
   const la = a.length;
   const lb = b.length;
   if (la === 0 || lb === 0) return 0;
-
   const matrix: number[][] = [];
-  for (let i = 0; i <= la; i++) {
-    matrix[i] = [i];
-  }
-  for (let j = 0; j <= lb; j++) {
-    matrix[0][j] = j;
-  }
+  for (let i = 0; i <= la; i++) matrix[i] = [i];
+  for (let j = 0; j <= lb; j++) matrix[0][j] = j;
   for (let i = 1; i <= la; i++) {
     for (let j = 1; j <= lb; j++) {
       const cost = a[i - 1] === b[j - 1] ? 0 : 1;
-      matrix[i][j] = Math.min(
-        matrix[i - 1][j] + 1,
-        matrix[i][j - 1] + 1,
-        matrix[i - 1][j - 1] + cost
-      );
+      matrix[i][j] = Math.min(matrix[i - 1][j] + 1, matrix[i][j - 1] + 1, matrix[i - 1][j - 1] + cost);
     }
   }
   return 1 - matrix[la][lb] / Math.max(la, lb);
@@ -745,26 +750,35 @@ export async function POST(request: NextRequest) {
     }
 
     const { business_name, location, keyword, website_url } = body;
-    const kw = keyword || business_name.split(/\s+/).pop() || "business";
-    const dfsLocation = formatDFSLocation(location);
+    const kw = keyword || business_name;
 
     console.log(`[audit] Starting audit for "${business_name}" in "${location}" (keyword: "${kw}")`);
 
-    // ─── Phase 1: DataForSEO parallel calls (primary) ─────────────
+    // ─── Step 1: Resolve location to DFS location_code ────────────
+    const loc = await resolveLocation(location);
+    console.log(`[audit] Resolved location: ${loc.name} (code: ${loc.code})`);
+
+    // ─── Step 2: DataForSEO parallel calls ────────────────────────
     const dfsPromises: Promise<any>[] = [];
 
-    // 1a. Google My Business Info (Live) — GBP profile data
+    // 2a. Maps SERP — search for the business name directly
+    //     This finds the business AND competitors in one call
+    const mapsLocationParam = loc.code
+      ? { location_code: loc.code }
+      : { location_name: loc.name };
+
     dfsPromises.push(
-      safeDFS("/business_data/google/my_business_info/live", [
+      safeDFS("/serp/google/maps/live/advanced", [
         {
           keyword: business_name,
-          location_name: dfsLocation,
+          ...mapsLocationParam,
           language_code: "en",
+          depth: 20,
         },
       ])
     );
 
-    // 1b. On-Page Instant Pages — website technical audit
+    // 2b. On-Page Instant Pages (if website provided)
     if (website_url) {
       const url = website_url.startsWith("http") ? website_url : `https://${website_url}`;
       dfsPromises.push(
@@ -779,36 +793,47 @@ export async function POST(request: NextRequest) {
       dfsPromises.push(Promise.resolve(null));
     }
 
-    // 1c. SERP Google Maps — local pack ranking + competitors
-    dfsPromises.push(
-      safeDFS("/serp/google/maps/live/advanced", [
-        {
-          keyword: `${kw} ${location.split(",")[0]?.trim()}`,
-          location_name: dfsLocation,
-          language_code: "en",
-          depth: 10,
-        },
-      ])
-    );
+    const [mapsData, onpageData] = await Promise.all(dfsPromises);
 
-    const [gbpInfo, onpageData, mapsData] = await Promise.all(dfsPromises);
+    // ─── Step 3: Find our business in Maps results ────────────────
+    const mapsItems = dfsItems(mapsData);
+    const businessMatch = findBusinessInMaps(mapsItems, business_name);
 
     console.log(
-      `[audit] DataForSEO results — GBP: ${gbpInfo ? "✓" : "✗"}, OnPage: ${onpageData ? "✓" : "✗"}, Maps: ${mapsData ? "✓" : "✗"}`
+      `[audit] Maps: ${mapsItems.length} results. Business found: ${businessMatch.found}${businessMatch.found ? ` (rank #${businessMatch.rank}: "${businessMatch.item?.title}")` : ""}`
+    );
+    console.log(
+      `[audit] OnPage: ${onpageData ? "✓" : "✗"} (score: ${dfsFirstItem(onpageData)?.onpage_score ?? "N/A"})`
     );
 
-    // ─── Phase 2: LocalSEOData fallback calls (for unique data) ───
-    // Only call if we have API key and want supplemental data
+    // ─── Step 4: If business not in Maps, try GBP Info directly ───
+    let gbpFallback = null;
+    if (!businessMatch.found) {
+      gbpFallback = await safeDFS("/business_data/google/my_business_info/live", [
+        {
+          keyword: business_name,
+          ...mapsLocationParam,
+          language_code: "en",
+        },
+      ]);
+      const gbpItem = dfsFirstItem(gbpFallback);
+      if (gbpItem) {
+        // Found via GBP — update businessMatch
+        businessMatch.item = gbpItem;
+        businessMatch.found = true;
+        businessMatch.rank = 0; // not in maps but has GBP
+        console.log(`[audit] GBP fallback found: "${gbpItem.title}"`);
+      }
+    }
+
+    // ─── Step 5: LocalSEOData supplemental calls ──────────────────
     let localAudit = null;
     let citations = null;
     let reviewsVelocity = null;
     let aiVis = null;
     let competitorGap = null;
 
-    const hasLSEOKey = !!process.env.LOCALSEODATA_API_KEY;
-
-    if (hasLSEOKey) {
-      // Call local-audit for recommendations and review velocity
+    if (process.env.LOCALSEODATA_API_KEY) {
       localAudit = await callLSEO("/v1/audit/local", {
         business_name,
         location,
@@ -816,136 +841,78 @@ export async function POST(request: NextRequest) {
         competitors: 5,
       });
 
-      const creditsRemaining = localAudit?.credits_remaining ?? 0;
-      console.log(`[audit] LocalSEOData credits remaining: ${creditsRemaining}`);
+      const cr = localAudit?.credits_remaining ?? 0;
+      console.log(`[audit] LSEO credits remaining: ${cr}`);
 
-      // Additional LSEO calls if credits allow
-      if (creditsRemaining >= 10) {
-        const lseoPhase2: Promise<any>[] = [];
+      if (cr >= 6) {
+        reviewsVelocity = await callLSEO("/v1/reviews/velocity", { business_name, location, period: "90d" });
+        const cr2 = reviewsVelocity?.credits_remaining ?? cr - 6;
 
-        // Review velocity (6 credits)
-        lseoPhase2.push(
-          callLSEO("/v1/reviews/velocity", {
-            business_name,
-            location,
-            period: "90d",
-          })
-        );
+        if (cr2 >= 10) {
+          competitorGap = await callLSEO("/v1/report/competitor-gap", { business_name, location, keyword: kw, competitors: 5 });
+          const cr3 = competitorGap?.credits_remaining ?? cr2 - 10;
 
-        const [revRes] = await Promise.all(lseoPhase2);
-        reviewsVelocity = revRes;
-
-        // Check remaining after phase 2
-        const phase2Credits = revRes?.credits_remaining ?? creditsRemaining - 6;
-
-        if (phase2Credits >= 10) {
-          // Competitor gap (10 credits)
-          competitorGap = await callLSEO("/v1/report/competitor-gap", {
-            business_name,
-            location,
-            keyword: kw,
-            competitors: 5,
-          });
-
-          const phase3Credits = competitorGap?.credits_remaining ?? phase2Credits - 10;
-
-          // AI Visibility if URL provided (10 credits)
-          if (website_url && phase3Credits >= 10) {
+          if (website_url && cr3 >= 10) {
             try {
-              const domain = new URL(
-                website_url.startsWith("http") ? website_url : `https://${website_url}`
-              ).hostname;
+              const domain = new URL(website_url.startsWith("http") ? website_url : `https://${website_url}`).hostname;
               aiVis = await callLSEO("/v1/ai/visibility", {
                 domain,
-                keywords: [
-                  `${kw} ${location.split(",")[0]?.trim()}`,
-                  `best ${kw} ${location.split(",")[0]?.trim()}`,
-                ],
+                keywords: [`${kw} ${location.split(",")[0]?.trim()}`],
                 location,
               });
-            } catch {
-              // skip
-            }
+            } catch { /* skip */ }
 
-            // Citation audit if credits remain
-            const gbpItem = dfsFirstItem(gbpInfo);
-            const addr = gbpItem?.address ?? location;
-            const phone = gbpItem?.phone ?? "";
-            const citCredits = aiVis?.credits_remaining ?? phase3Credits - 10;
-            if (citCredits >= 5 && addr) {
-              citations = await callLSEO("/v1/audit/citation", {
-                business_name,
-                address: addr,
-                phone: phone,
-              });
+            const addr = businessMatch.item?.address ?? location;
+            const phone = businessMatch.item?.phone ?? "";
+            const cr4 = aiVis?.credits_remaining ?? (cr3 - 10);
+            if (cr4 >= 5 && addr) {
+              citations = await callLSEO("/v1/audit/citation", { business_name, address: addr, phone });
             }
           }
         }
       }
     }
 
-    // ─── Build Scorecard & Gap Analysis ───────────────────────────
+    // ─── Step 6: Build Scorecard & Gap Analysis ───────────────────
     const scorecard = buildScorecard(
-      gbpInfo,
-      onpageData,
-      mapsData,
-      localAudit,
-      citations,
-      reviewsVelocity,
-      aiVis,
-      competitorGap,
-      business_name
+      businessMatch, mapsItems, onpageData,
+      localAudit, citations, reviewsVelocity, aiVis, competitorGap,
+      website_url
     );
 
     const gapAnalysis = buildGapAnalysis(
-      gbpInfo,
-      onpageData,
-      mapsData,
-      localAudit,
-      citations,
-      reviewsVelocity,
-      aiVis,
-      competitorGap,
-      business_name
+      businessMatch, mapsItems, onpageData,
+      localAudit, citations, reviewsVelocity, aiVis, competitorGap,
+      website_url
     );
 
     const recommendations = extractLSEOData(localAudit)?.recommendations ?? [];
 
-    // Build raw profile from DataForSEO GBP
-    const gbpItem = dfsFirstItem(gbpInfo);
-    const rawProfile = gbpItem
+    // ─── Build raw profile ────────────────────────────────────────
+    const biz = businessMatch.item;
+    const rawProfile = biz
       ? {
-          name: gbpItem.title,
-          address: gbpItem.address,
-          phone: gbpItem.phone,
-          website: gbpItem.url,
-          category: gbpItem.category,
-          additional_categories: gbpItem.additional_categories,
-          rating: gbpItem.rating?.value,
-          reviews_count: gbpItem.rating?.votes_count,
-          total_photos: gbpItem.total_photos,
-          is_claimed: gbpItem.is_claimed,
-          hours: gbpItem.work_time?.work_hours?.timetable,
-          attributes: gbpItem.attributes?.available_attributes,
-          description: gbpItem.description,
-          place_id: gbpItem.place_id,
-          cid: gbpItem.cid,
-          main_image: gbpItem.main_image,
+          name: biz.title,
+          address: biz.address ?? biz.address_info,
+          phone: biz.phone,
+          website: biz.url ?? biz.domain,
+          category: biz.category,
+          additional_categories: biz.additional_categories,
+          rating: biz.rating?.value,
+          reviews_count: biz.rating?.votes_count,
+          total_photos: biz.total_photos,
+          is_claimed: biz.is_claimed,
+          hours: biz.work_time,
+          description: biz.description,
+          place_id: biz.place_id,
+          cid: biz.cid,
+          main_image: biz.main_image,
         }
-      : extractLSEOData(localAudit) ?? null;
+      : null;
 
-    // Build competitors from DataForSEO maps
-    const mapsItems = dfsItems(mapsData) ?? [];
-    const normalizedBiz = business_name.toLowerCase().trim();
+    // Competitors
     const competitors = mapsItems
-      .filter((item: any) => {
-        const title = (item.title ?? "").toLowerCase().trim();
-        return !(
-          title.includes(normalizedBiz) ||
-          normalizedBiz.includes(title) ||
-          levenshteinSimilarity(title, normalizedBiz) > 0.6
-        );
-      })
+      .filter((item: any) => item !== biz)
       .map((c: any) => ({
         name: c.title,
         rating: c.rating?.value ?? 0,
@@ -956,15 +923,13 @@ export async function POST(request: NextRequest) {
         place_id: c.place_id,
       }));
 
-    // Merge with LocalSEOData competitors if DataForSEO didn't return enough
     const lseoCompetitors = extractLSEOData(localAudit)?.competitors ?? extractLSEOData(competitorGap)?.competitors ?? [];
     const finalCompetitors = competitors.length > 0 ? competitors : lseoCompetitors;
 
-    // Calculate cost
     const dfsCost =
-      (gbpInfo?.tasks?.[0]?.cost ?? 0) +
+      (mapsData?.tasks?.[0]?.cost ?? 0) +
       (onpageData?.tasks?.[0]?.cost ?? 0) +
-      (mapsData?.tasks?.[0]?.cost ?? 0);
+      (gbpFallback?.tasks?.[0]?.cost ?? 0);
 
     return NextResponse.json({
       status: "success",
@@ -981,9 +946,11 @@ export async function POST(request: NextRequest) {
       competitors: finalCompetitors,
       dataSources: {
         dataforseo: {
-          gbp: !!gbpItem,
+          businessFound: businessMatch.found,
+          businessRank: businessMatch.rank,
           onpage: !!dfsFirstItem(onpageData),
-          maps: mapsItems.length > 0,
+          mapsResults: mapsItems.length,
+          locationResolved: loc.code ? `${loc.name} (${loc.code})` : loc.name,
           cost: `$${dfsCost.toFixed(4)}`,
         },
         localseodata: {
