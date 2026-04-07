@@ -54,6 +54,8 @@ interface AuditResult {
   recommendations: string[];
   rawProfile: Record<string, unknown> | null;
   competitors: Array<Record<string, unknown>>;
+  creditsUsed?: number;
+  creditsRemaining?: number | null;
 }
 
 // ─── Score Color Helpers ─────────────────────────────────────────────
@@ -369,6 +371,24 @@ export default function AuditPage() {
                           ? "Significant gaps detected. Action plan recommended."
                           : "Critical issues need immediate attention."}
                   </p>
+                  {/* Data sources indicator */}
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {result.scorecard.dimensions.map((dim) => (
+                      <span
+                        key={dim.label}
+                        className={`inline-flex items-center gap-1 text-[10px] font-mono px-2 py-0.5 rounded-full ${
+                          dim.score > 0
+                            ? "bg-emerald-500/10 text-emerald-400"
+                            : "bg-navy-800 text-navy-500"
+                        }`}
+                      >
+                        <span className={`w-1.5 h-1.5 rounded-full ${
+                          dim.score > 0 ? "bg-emerald-400" : "bg-navy-600"
+                        }`} />
+                        {dim.label.split(" ")[0]}
+                      </span>
+                    ))}
+                  </div>
                 </div>
               </div>
             </div>
