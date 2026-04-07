@@ -87,6 +87,11 @@ async function resolveLocation(location: string): Promise<{ code: number | null;
         const locName = (m.location_name ?? "").toLowerCase();
         if (parts.every((p) => locName.includes(p))) return { code: m.location_code, name: m.location_name };
       }
+    }
+    // If multiple matches for a single city name (e.g. "Toronto" matches Toronto,ON and Toronto,OH)
+    // pick the first match — DFS returns them roughly by prominence
+    if (matches.length > 0) {
+      console.log(`[audit] Location "${location}" matched ${matches.length} results, using: ${matches[0].location_name}`);
       return { code: matches[0].location_code, name: matches[0].location_name };
     }
     console.warn(`[audit] Could not resolve location "${location}" to a code`);
