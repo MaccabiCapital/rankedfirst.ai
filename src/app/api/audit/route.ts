@@ -389,14 +389,44 @@ function buildScorecard(
   const citScore = citations?.citation_score ?? citationsRaw?.citation_score ?? 0;
   const citTotal = citations?.total_directories ?? citationsRaw?.total_directories ?? 0;
   const citConsistent = citations?.consistent ?? citationsRaw?.consistent ?? 0;
+
+  let finalCitScore = clampScore(citScore);
+  let citDetail = "";
+
+  if (citScore > 0) {
+    citDetail = `${citScore}/100 — ${citConsistent}/${citTotal} directories consistent`;
+  } else {
+    // Estimate citation health from GBP completeness signals
+    // A business with a claimed GBP, phone, address, and website is likely listed in major directories
+    const citSignals = [
+      biz?.phone,              // Has phone → likely in phone directories
+      biz?.address,            // Has address → likely in map directories
+      biz?.domain || biz?.url, // Has website → likely in web directories
+      biz?.is_claimed,         // Claimed GBP → owner manages listings
+      biz?.category,           // Has category → better directory matching
+    ];
+    const citPresent = citSignals.filter(Boolean).length;
+    if (citPresent >= 3) {
+      finalCitScore = clampScore(Math.round((citPresent / citSignals.length) * 55 + 15));
+      citDetail = `Estimated ${finalCitScore}/100 from GBP signals (${citPresent}/5 key fields present)`;
+    } else if (citPresent > 0) {
+      finalCitScore = clampScore(citPresent * 10);
+      citDetail = `Estimated ${finalCitScore}/100 — incomplete business info limits directory presence`;
+    } else if (biz) {
+      finalCitScore = 15;
+      citDetail = "Business exists but missing key info for directory listings";
+    } else {
+      finalCitScore = 0;
+      citDetail = "No business listing found — create a GBP with complete NAP data";
+    }
+  }
+
   dimensions.push({
     label: "Citation Consistency",
-    score: clampScore(citScore),
+    score: finalCitScore,
     weight: 0.12,
-    detail: citScore
-      ? `${citScore}/100 — ${citConsistent}/${citTotal} directories consistent`
-      : "Citation audit unavailable — will check when credits refresh",
-    weighted: Math.round(clampScore(citScore) * 0.12),
+    detail: citDetail,
+    weighted: Math.round(finalCitScore * 0.12),
     icon: "citations",
   });
 
@@ -405,17 +435,17 @@ function buildScorecard(
   let onpageDetail = "";
   const onpageItem = dfsFirstItem(onpageData);
 
-  if (onpageItem && onpageItem.onpage_score) {
-    onpageScore = onpageItem.onpage_score;
+  if (onpageItem) {
+    // Accept onpage_score even if 0 — the item existing means DFS crawled the page
+    onpageScore = onpageItem.onpage_score ?? 0;
 
     // Check if the page was actually accessible
     const pageTitle = onpageItem.meta?.title ?? "";
     const statusCode = onpageItem.status_code ?? 200;
 
     if (statusCode >= 400 || pageTitle.toLowerCase().includes("forbidden") || pageTitle.toLowerCase().includes("denied")) {
-      onpageDetail = `Website returned ${statusCode >= 400 ? statusCode : "403 Forbidden"} — crawler blocked. Technical score: ${Math.round(onpageScore)}/100`;
-      // Penalize for blocking crawlers (also blocks search engines)
-      onpageScore = Math.min(onpageScore, 50);
+      onpageDetail = `Website returned ${statusCode >= 400 ? statusCode : "403 Forbidden"} — crawler blocked`;
+      onpageScore = Math.min(onpageScore || 20, 50);
     } else {
       const lcp = onpageItem.page_timing?.largest_contentful_paint;
       const cls = onpageItem.meta?.cumulative_layout_shift;
@@ -438,9 +468,16 @@ function buildScorecard(
       if (issueList.length > 0) onpageDetail += ` — ${issueList.join(", ")}`;
     }
   } else if (websiteUrl) {
-    onpageDetail = "Could not analyze website";
+    // DFS couldn't crawl but we have a URL — give partial credit based on what we know
+    onpageScore = 25;
+    onpageDetail = "Could not crawl website — may be blocking automated requests";
+  } else if (biz?.domain || biz?.url) {
+    // Found a website via GBP but user didn't provide one — still give some credit
+    onpageScore = 20;
+    onpageDetail = `Website detected (${biz.domain || biz.url}) but not analyzed — rerun with website URL for full audit`;
   } else {
-    onpageDetail = "No website URL provided";
+    onpageScore = 0;
+    onpageDetail = "No website found — critical for SEO";
   }
 
   dimensions.push({
@@ -455,14 +492,56 @@ function buildScorecard(
   // ─── 6. AI Visibility ──────────────────────────────────────────
   const aiMentions = aiVis?.total_mentions ?? 0;
   const aiImpressions = aiVis?.total_impressions ?? 0;
-  const aiScore = clampScore(Math.min(aiMentions * 10, 100));
+  let aiScore = 0;
+  let aiDetail = "";
+
+  if (aiMentions > 0) {
+    aiScore = clampScore(Math.min(aiMentions * 10, 100));
+    aiDetail = `${aiMentions} AI mentions, ~${aiImpressions} impressions`;
+  } else {
+    // Estimate AI visibility from SEO signals we DO have
+    // Strong organic presence + good GBP = higher chance of appearing in AI answers
+    let aiEstimate = 0;
+    const aiParts: string[] = [];
+
+    // Organic keyword rankings increase AI citation likelihood
+    if (totalRankedKeywords > 0) {
+      const kwBoost = Math.min(totalRankedKeywords * 2, 25);
+      aiEstimate += kwBoost;
+      aiParts.push(`${totalRankedKeywords} ranked keywords`);
+    }
+    // Top-10 rankings strongly increase AI visibility
+    if (top10Keywords > 0) {
+      aiEstimate += Math.min(top10Keywords * 8, 20);
+      aiParts.push(`${top10Keywords} in top 10`);
+    }
+    // On-page quality contributes
+    if (onpageScore > 70) {
+      aiEstimate += 10;
+    } else if (onpageScore > 40) {
+      aiEstimate += 5;
+    }
+    // GBP presence helps for local AI queries
+    if (biz) {
+      aiEstimate += 5;
+      if (reviewsCount > 20) aiEstimate += 5;
+    }
+
+    aiScore = clampScore(aiEstimate);
+    if (aiScore > 0) {
+      aiDetail = `Estimated ${aiScore}/100 from SEO signals (${aiParts.join(", ") || "GBP presence"})`;
+    } else if (websiteUrl) {
+      aiDetail = "Low AI visibility — no organic rankings or strong SEO signals detected";
+    } else {
+      aiDetail = "No website — AI assistants have nothing to reference";
+    }
+  }
+
   dimensions.push({
     label: "AI Visibility",
     score: aiScore,
     weight: 0.12,
-    detail: aiMentions
-      ? `${aiMentions} AI mentions, ~${aiImpressions} impressions`
-      : "AI visibility check unavailable — will check when credits refresh",
+    detail: aiDetail,
     weighted: Math.round(aiScore * 0.12),
     icon: "ai",
   });

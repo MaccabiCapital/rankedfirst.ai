@@ -467,7 +467,12 @@ export default function AuditPage() {
                           style={{ width: `${dim.score}%` }}
                         />
                       </div>
-                      <p className="text-xs text-navy-400 font-mono">{dim.detail}</p>
+                      <p className="text-xs text-navy-400 font-mono">
+                        {dim.detail.startsWith("Estimated") && (
+                          <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-navy-800 text-navy-500 text-[9px] uppercase tracking-wider font-bold mr-1.5">Est</span>
+                        )}
+                        {dim.detail}
+                      </p>
                     </div>
                   </div>
                 ))}
