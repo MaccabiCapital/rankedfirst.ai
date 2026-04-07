@@ -50,6 +50,7 @@ export const navigation = {
     { name: "Industries", href: "/industries", hasDropdown: true },
     { name: "Skills", href: "/skills" },
     { name: "Tools", href: "/tools" },
+    { name: "Audit", href: "/audit" },
     { name: "About", href: "/about" },
     { name: "Clients", href: "/clients" },
     { name: "Workbench", href: "/workbench" },
