@@ -171,6 +171,9 @@ export default function AuditPage() {
 
   async function runAudit(e: React.FormEvent) {
     e.preventDefault();
+    if (!businessName.trim()) { setError("Business name is required"); return; }
+    if (!city.trim()) { setError("City is required"); return; }
+    if (!stateProvince.trim()) { setError("State / Province is required"); return; }
     setLoading(true);
     setError(null);
     setReport(null);
@@ -234,11 +237,11 @@ export default function AuditPage() {
       {/* Form */}
       <section className="pb-16">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <form onSubmit={runAudit} className="bg-navy-900 border border-navy-800 rounded-2xl p-6 md:p-8">
+          <form onSubmit={runAudit} noValidate className="bg-navy-900 border border-navy-800 rounded-2xl p-6 md:p-8">
             <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-5">
               <div className="lg:col-span-2">
                 <label className="block text-sm font-mono font-medium text-navy-300 mb-2">Business Name <span className="text-red-400">*</span></label>
-                <input type="text" required value={businessName} onChange={(e) => setBusinessName(e.target.value)} placeholder="e.g. Morrison Plumbing" className="w-full px-4 py-3 bg-navy-950 border border-navy-700 rounded-lg text-white placeholder:text-navy-500 font-body focus:outline-none focus:ring-2 focus:ring-accent-500 focus:border-transparent" />
+                <input type="text" value={businessName} onChange={(e) => setBusinessName(e.target.value)} placeholder="e.g. Morrison Plumbing" className="w-full px-4 py-3 bg-navy-950 border border-navy-700 rounded-lg text-white placeholder:text-navy-500 font-body focus:outline-none focus:ring-2 focus:ring-accent-500 focus:border-transparent" />
               </div>
               <div>
                 <label className="block text-sm font-mono font-medium text-navy-300 mb-2">Website URL <span className="text-navy-500">(optional)</span></label>
@@ -246,11 +249,11 @@ export default function AuditPage() {
               </div>
               <div>
                 <label className="block text-sm font-mono font-medium text-navy-300 mb-2">City <span className="text-red-400">*</span></label>
-                <input type="text" required value={city} onChange={(e) => setCity(e.target.value)} placeholder="e.g. Denver" className="w-full px-4 py-3 bg-navy-950 border border-navy-700 rounded-lg text-white placeholder:text-navy-500 font-body focus:outline-none focus:ring-2 focus:ring-accent-500 focus:border-transparent" />
+                <input type="text" value={city} onChange={(e) => setCity(e.target.value)} placeholder="e.g. Denver" className="w-full px-4 py-3 bg-navy-950 border border-navy-700 rounded-lg text-white placeholder:text-navy-500 font-body focus:outline-none focus:ring-2 focus:ring-accent-500 focus:border-transparent" />
               </div>
               <div>
                 <label className="block text-sm font-mono font-medium text-navy-300 mb-2">State / Province <span className="text-red-400">*</span></label>
-                <input type="text" required value={stateProvince} onChange={(e) => setStateProvince(e.target.value)} placeholder="e.g. CO or Ontario" className="w-full px-4 py-3 bg-navy-950 border border-navy-700 rounded-lg text-white placeholder:text-navy-500 font-body focus:outline-none focus:ring-2 focus:ring-accent-500 focus:border-transparent" />
+                <input type="text" value={stateProvince} onChange={(e) => setStateProvince(e.target.value)} placeholder="e.g. CO or Ontario" className="w-full px-4 py-3 bg-navy-950 border border-navy-700 rounded-lg text-white placeholder:text-navy-500 font-body focus:outline-none focus:ring-2 focus:ring-accent-500 focus:border-transparent" />
               </div>
               <div>
                 <label className="block text-sm font-mono font-medium text-navy-300 mb-2">Primary Keyword <span className="text-navy-500">(optional)</span></label>
