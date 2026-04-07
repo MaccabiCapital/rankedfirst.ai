@@ -234,7 +234,7 @@ function HeroSection() {
         <div className="mt-16 grid grid-cols-3 gap-4 max-w-xl mx-auto">
           {[
             { value: "36", label: "Skills" },
-            { value: "7", label: "Agents" },
+            { value: "12", label: "Agents" },
             { value: "12", label: "Tool Integrations" },
           ].map((stat) => (
             <div

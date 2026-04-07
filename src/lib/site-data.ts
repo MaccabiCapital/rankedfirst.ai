@@ -29,6 +29,11 @@ export const navigation = {
     { name: "LSA Ads", href: "/agents/lsa-ads", description: "Local Services Ads monitoring" },
     { name: "AI Visibility", href: "/agents/ai-visibility", description: "LLM mention tracking" },
     { name: "Local Reporting", href: "/agents/local-reporting", description: "Automated client reports" },
+    { name: "LLM Citations", href: "/agents/llm-citation-building", description: "AI roundup placement" },
+    { name: "Schema Automation", href: "/agents/schema-automation", description: "JSON-LD generation & deployment" },
+    { name: "Apple & Bing", href: "/agents/apple-bing-visibility", description: "Apple Maps & ChatGPT visibility" },
+    { name: "GBP Protection", href: "/agents/gbp-protection", description: "Profile change monitoring" },
+    { name: "GBP Posts", href: "/agents/gbp-posts", description: "Automated posting calendar" },
   ],
   industries: [
     { name: "All Industries", href: "/industries", description: "See all verticals we serve" },
@@ -45,6 +50,7 @@ export const navigation = {
     { name: "Industries", href: "/industries", hasDropdown: true },
     { name: "Skills", href: "/skills" },
     { name: "About", href: "/about" },
+    { name: "Workbench", href: "/workbench" },
   ],
 };
 
@@ -69,7 +75,7 @@ export const services = [
       "Location page strategy",
       "Structured data implementation",
     ],
-    agents: ["gbp-optimization", "geogrid-analysis", "local-citations", "review-management", "lsa-ads"],
+    agents: ["gbp-optimization", "geogrid-analysis", "local-citations", "review-management", "lsa-ads", "gbp-protection", "gbp-posts"],
     faq: [
       {
         q: "What is geogrid analysis?",
@@ -112,7 +118,7 @@ export const services = [
       "Review sentiment optimization for AI",
       "Conversational query targeting",
     ],
-    agents: ["ai-visibility"],
+    agents: ["ai-visibility", "llm-citation-building", "schema-automation", "apple-bing-visibility"],
     faq: [
       {
         q: "What is local AI visibility?",
@@ -450,6 +456,197 @@ export const agents = [
       },
     ],
   },
+  {
+    slug: "llm-citation-building",
+    name: "LLM Citation Building Agent",
+    shortName: "LLM Citations",
+    tagline: "Get cited when AI answers local questions.",
+    description:
+      "Places your business in AI-indexed roundup content — 'Best X in City' listicles, comparison articles, and recommendation posts that ChatGPT, Perplexity, and Gemini cite when answering local queries.",
+    longDescription:
+      "AI assistants don't just search the web — they cite specific sources. When someone asks ChatGPT for the best dentist in Buffalo, the answer comes from indexed roundup articles, listicles, and review aggregators. The LLM Citation Building Agent identifies which content formats and domains AI models cite for your business category, audits your current AI citation presence, and systematically builds new citations in the content that AI systems index and reference. This is the next evolution of traditional citation building — adapted for the generative search era.",
+    capabilities: [
+      "Identify which content formats and domains AI models cite for local queries",
+      "Audit current AI citation presence across ChatGPT, Perplexity, Gemini",
+      "Create or place business in AI-indexable roundup content (geo + category specific)",
+      "Monitor citation source domain authority for AI indexing signals",
+      "Track AI mention velocity and citation rate over time",
+      "Competitive AI citation gap analysis",
+      "Integrate with Citation Intelligence data for source prioritization",
+      "Monthly AI citation growth reporting",
+    ],
+    dataSources: ["Custom LLM Monitoring", "LocalSEOData", "Ahrefs", "Semrush"],
+    relatedServices: ["local-ai"],
+    relatedSkills: ["ai-local-search", "local-citations", "local-link-building"],
+    status: "active",
+    faq: [
+      {
+        q: "What is LLM citation building?",
+        a: "LLM citation building places your business in the content that AI assistants cite when answering local queries. When someone asks ChatGPT 'best plumber in Denver,' the answer pulls from specific web sources — roundup articles, comparison posts, review aggregators. We build your presence in those exact sources.",
+      },
+      {
+        q: "How is this different from traditional citation building?",
+        a: "Traditional citations focus on directory listings (Yelp, BBB, Yellow Pages) for Google's algorithm. LLM citations target the content formats that AI models prefer to cite — listicles, comparison articles, expert roundups, and review aggregator pages. Both matter, but the AI citation channel is growing fastest.",
+      },
+      {
+        q: "Which AI platforms does this target?",
+        a: "We build citations that are indexed and cited by ChatGPT, Google Gemini (including AI Overviews), Perplexity, Microsoft Copilot, and Apple Intelligence. Each platform has different content preferences, and our strategy accounts for all of them.",
+      },
+    ],
+  },
+  {
+    slug: "schema-automation",
+    name: "Local Schema Automation Agent",
+    shortName: "Schema Automation",
+    tagline: "Structured data that AI systems actually read.",
+    description:
+      "Automatically generates, validates, and deploys JSON-LD structured data for local businesses — the foundational technical layer that AI search engines use to surface and recommend businesses.",
+    longDescription:
+      "Structured data is no longer an SEO nice-to-have — it's AI search infrastructure. Google AI Overviews, ChatGPT, Perplexity, and voice assistants all preferentially surface businesses with correctly implemented schema markup. The Local Schema Automation Agent handles the full lifecycle: auditing existing schema, generating complete JSON-LD bundles (LocalBusiness with correct subtype, GeoCoordinates, sameAs entity linking, FAQPage, BreadcrumbList, Service schemas), validating against Google's Rich Results Test, and deploying via pixel script — no CMS access required.",
+    capabilities: [
+      "Audit existing schema — detect missing, incomplete, or invalid markup",
+      "Generate complete JSON-LD schema bundle (LocalBusiness, FAQPage, BreadcrumbList, Service)",
+      "Implement sameAs links to entity hubs (Wikidata, Knowledge Graph)",
+      "Handle areaServed schema for service-area businesses",
+      "Deploy schema via pixel script — no CMS access required",
+      "Validate against Google Rich Results Test automatically",
+      "Track schema impact on AI Overview appearances",
+      "Scale to multi-location — generate schema for each location in bulk via GBP API",
+      "19+ schema properties per business (vs. the industry-standard 8)",
+    ],
+    dataSources: ["Google Business Profile API", "Google Rich Results Test", "LocalSEOData"],
+    relatedServices: ["local-ai", "local-search"],
+    relatedSkills: ["local-schema", "gbp-api-automation"],
+    status: "active",
+    faq: [
+      {
+        q: "Why does schema markup matter for AI search?",
+        a: "AI systems extract structured data to construct answers, determine entity relationships, and verify business information. A correctly implemented LocalBusiness schema with complete properties tells AI exactly what your business does, where you serve, and what customers think — making it significantly more likely to be recommended.",
+      },
+      {
+        q: "What does '19+ properties' mean?",
+        a: "Most schema implementations include only 8 basic properties (name, address, phone, hours). We implement 19+ including areaServed, aggregateRating, foundingDate, knowsAbout, potentialAction, sameAs links, and AI-visibility properties — the signals that give AI systems confidence to recommend your business.",
+      },
+      {
+        q: "Do I need to give you CMS access?",
+        a: "No. The agent can deploy schema via a lightweight pixel script (similar to a Google Analytics tag) or provide code blocks for manual implementation. For clients using our managed service, we handle deployment completely.",
+      },
+    ],
+  },
+  {
+    slug: "apple-bing-visibility",
+    name: "Apple & Bing Visibility Agent",
+    shortName: "Apple & Bing",
+    tagline: "1 billion iOS devices. 300 million ChatGPT users. One agent.",
+    description:
+      "Optimizes Apple Business Connect and Bing Places profiles — the data sources that power Siri, Apple Maps, Apple Intelligence, ChatGPT Browse, and Microsoft Copilot local recommendations.",
+    longDescription:
+      "Google isn't the only game in local search anymore. Apple Business Connect powers Siri, Apple Maps, Spotlight Search, and Apple Intelligence across 1+ billion iOS devices. Bing Places feeds directly into ChatGPT's browsing results, Microsoft Copilot, and Bing Maps — reaching 300+ million weekly ChatGPT users. Yet both channels are systematically ignored by most local SEO platforms. The Apple & Bing Visibility Agent audits and optimizes both profiles, monitors Apple Maps rankings, tracks ChatGPT visibility improvements from Bing optimization, and flags inconsistencies between Google, Apple, and Bing.",
+    capabilities: [
+      "Audit Apple Business Connect profile (Showcases, Action Links, categories, photos)",
+      "Generate Apple-specific optimization recommendations",
+      "Claim and optimize Bing Places listing for ChatGPT visibility",
+      "Monitor Apple Maps rank position",
+      "Track ChatGPT Browse visibility improvements from Bing optimization",
+      "Flag inconsistencies between Google, Apple, and Bing profiles",
+      "Optimize for Siri and Apple Intelligence local queries",
+      "Microsoft Copilot local recommendation monitoring",
+    ],
+    dataSources: ["Apple Business Connect API", "Bing Places API", "Local Falcon", "LocalSEOData"],
+    relatedServices: ["local-ai", "local-search"],
+    relatedSkills: ["apple-business-connect", "bing-places", "ai-local-search"],
+    status: "active",
+    faq: [
+      {
+        q: "Why do Apple Maps and Bing Places matter?",
+        a: "Apple Maps is the default on 1+ billion iOS devices. When someone asks Siri for a recommendation, it pulls from Apple Business Connect data. Bing Places powers ChatGPT's local results — when ChatGPT searches for businesses, it uses Bing's index. Ignoring these means being invisible to a massive and growing audience.",
+      },
+      {
+        q: "Does optimizing Bing actually improve ChatGPT recommendations?",
+        a: "Yes. ChatGPT uses Bing as its primary search backend when browsing for current information. A well-optimized Bing Places profile with complete business data, reviews, and accurate categories directly improves your chances of being surfaced in ChatGPT local recommendations.",
+      },
+      {
+        q: "What does Apple Business Connect optimization include?",
+        a: "We optimize Showcases (promotional content), Action Links (booking, ordering), category accuracy, photo quality, OpenTable/reservation integration, and all Apple-specific attributes. We also monitor your Apple Maps rank position alongside your Google rankings.",
+      },
+    ],
+  },
+  {
+    slug: "gbp-protection",
+    name: "GBP Protection Agent",
+    shortName: "GBP Protection",
+    tagline: "24/7 monitoring. Instant alerts. One-click revert.",
+    description:
+      "Monitors all Google Business Profile fields around the clock, catches unauthorized changes within minutes, identifies the source, and enables one-click revert to protect your rankings.",
+    longDescription:
+      "Google allows users, competitors, and its own AI systems to suggest edits to your business profile — including category changes, address modifications, and hours updates. An undetected category change can collapse your Map Pack rankings overnight. The GBP Protection Agent monitors every field 24/7, alerts on changes within minutes, identifies whether the change came from Google's auto-update, a user suggestion, or a competitor edit, and enables instant revert to the last known-good state. For multi-location clients, it runs silently in the background and only surfaces when action is required.",
+    capabilities: [
+      "Real-time monitoring of all GBP fields (name, address, phone, categories, hours, attributes, photos)",
+      "Identify change source (Google AI update, user edit, competitor suggestion)",
+      "Instant alert notifications (email, SMS, dashboard)",
+      "One-click revert to last-known-good state",
+      "Bulk revert across multiple locations",
+      "Change log with timeline for audit purposes",
+      "Flag high-risk changes (category, address) vs. informational changes",
+      "Daily snapshot backups of complete profile state",
+    ],
+    dataSources: ["Google Business Profile API", "LocalSEOData"],
+    relatedServices: ["local-search"],
+    relatedSkills: ["gbp-optimization", "gbp-api-automation", "multi-location-seo"],
+    status: "active",
+    faq: [
+      {
+        q: "Who can change my Google Business Profile without my permission?",
+        a: "Google itself (via AI-driven auto-updates), any Google user (via 'Suggest an edit'), competitors (via malicious edits), and Google's automated systems that merge or modify listings. All of these happen without notification to the business owner.",
+      },
+      {
+        q: "How quickly does the agent detect changes?",
+        a: "The agent polls your profile at configurable intervals — typically every 15-60 minutes for high-priority clients. Critical field changes (categories, address, business name) trigger immediate alerts.",
+      },
+      {
+        q: "Can it protect multiple locations at once?",
+        a: "Yes. The agent scales to hundreds of locations, running silently in the background and only surfacing when action is needed. For multi-location brands, bulk revert lets you fix coordinated attacks or mass Google auto-updates in one click.",
+      },
+    ],
+  },
+  {
+    slug: "gbp-posts",
+    name: "GBP Post & Content Agent",
+    shortName: "GBP Posts",
+    tagline: "Consistent posts. Zero effort. Ranking signal on autopilot.",
+    description:
+      "Generates and schedules a full Google Business Profile content calendar — all 5 post types with keyword-aware copy, CTAs, and photo direction, maintaining the posting cadence that drives Map Pack rankings.",
+    longDescription:
+      "GBP posting cadence is a proven Map Pack ranking signal — businesses that post regularly rank higher than those that don't. But most businesses and agencies struggle to maintain consistent posting across locations. The GBP Post & Content Agent generates a monthly content calendar from your keyword data, drafts posts across all 5 types (What's New, Offer, Event, Product, Service updates), includes geo-relevant copy and CTAs, and schedules them via the GBP API. When a posting gap is detected (7+ days without a post), it auto-generates and queues content to maintain your cadence.",
+    capabilities: [
+      "Generate monthly content calendar from geogrid keyword data",
+      "Draft posts across all 5 GBP post types",
+      "Keyword-aware copy with geo-relevant CTAs",
+      "Schedule posts via GBP API on optimal cadence",
+      "Post gap detection — auto-generate when cadence drops",
+      "Track post engagement metrics (views, clicks, calls)",
+      "Multi-location batch posting",
+      "Photo direction and visual content suggestions",
+    ],
+    dataSources: ["Google Business Profile API", "LocalSEOData"],
+    relatedServices: ["local-search"],
+    relatedSkills: ["gbp-posts", "gbp-optimization", "local-keyword-research"],
+    status: "active",
+    faq: [
+      {
+        q: "How does GBP posting affect rankings?",
+        a: "Google's algorithm rewards active, regularly updated profiles. Businesses that post weekly consistently outrank those with stale profiles. Posts also drive direct engagement — calls, website clicks, and direction requests — which are themselves ranking signals.",
+      },
+      {
+        q: "What types of posts does the agent create?",
+        a: "All five GBP post types: What's New (general updates), Offers (promotions and deals), Events (time-bound happenings), Products (inventory highlights), and Service updates. Each type triggers different user actions and Google displays them differently.",
+      },
+      {
+        q: "Can it handle posting for multiple locations?",
+        a: "Yes. The agent generates location-specific content that references local neighborhoods, services, and keywords. It can manage posting across hundreds of locations with unique, non-duplicate content for each.",
+      },
+    ],
+  },
 ];
 
 // ---- Skills ----
@@ -477,6 +674,9 @@ export const strategySkills = [
   "ai-local-search",
   "apple-business-connect",
   "bing-places",
+  "llm-citation-building",
+  "schema-automation",
+  "gbp-protection",
 ];
 
 export const toolSkills = [
@@ -616,4 +816,7 @@ export const tools = [
   { name: "Google Search Console", color: "#4285F4" },
   { name: "Google Analytics", color: "#E37400" },
   { name: "Screaming Frog", color: "#6BC04B" },
+  { name: "Apple Business Connect", color: "#000000" },
+  { name: "Bing Places", color: "#00809D" },
+  { name: "Google Rich Results Test", color: "#34A853" },
 ];
