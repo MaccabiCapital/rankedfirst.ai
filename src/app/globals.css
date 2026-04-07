@@ -67,3 +67,29 @@ body {
     color-scheme: dark;
   }
 }
+
+/* ---- Theme Tokens ---- */
+:root,
+.dark {
+  --bg-primary: var(--color-navy-950);
+  --bg-secondary: var(--color-navy-900);
+  --bg-card: #0F1D35CC; /* navy-900/80 */
+  --bg-card-hover: var(--color-navy-900);
+  --bg-input: var(--color-navy-900);
+  --bg-header: rgba(10, 21, 40, 0.8);
+
+  --border-primary: rgba(27, 43, 74, 0.6); /* navy-800/60 */
+  --border-secondary: var(--color-navy-800);
+
+  --text-primary: var(--color-navy-50);
+  --text-secondary: var(--color-navy-300);
+  --text-muted: var(--color-navy-400);
+  --text-faint: var(--color-navy-500);
+
+  --accent-primary: var(--color-accent-600);
+  --accent-text: var(--color-accent-400);
+
+  color-scheme: dark;
+}
+
+/* Light mode overrides are in light-mode.css (imported separately to avoid Tailwind v4 layer stripping) */

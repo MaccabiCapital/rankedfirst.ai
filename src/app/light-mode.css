@@ -1,0 +1,369 @@
+/* ============================================================
+   Light Mode Overrides
+   Imported separately from globals.css to avoid Tailwind v4
+   layer conflicts. All rules use !important to override utilities.
+   ============================================================ */
+
+/* ---- Theme Tokens ---- */
+.light {
+  --bg-primary: #f8fafc;
+  --bg-secondary: #f1f5f9;
+  --bg-card: rgba(255, 255, 255, 0.9);
+  --bg-card-hover: #ffffff;
+  --bg-input: #ffffff;
+  --bg-header: rgba(248, 250, 252, 0.85);
+  --border-primary: rgba(226, 232, 240, 0.8);
+  --border-secondary: #e2e8f0;
+  --text-primary: #0f172a;
+  --text-secondary: #334155;
+  --text-muted: #64748b;
+  --text-faint: #94a3b8;
+  --accent-primary: #2563eb;
+  --accent-text: #2563eb;
+  color-scheme: light;
+}
+
+/* ---- Body ---- */
+.light body {
+  background-color: #f8fafc !important;
+  color: #0f172a !important;
+}
+
+/* ---- Background overrides ---- */
+.light .bg-navy-950,
+.light .bg-navy-950\/50,
+.light .bg-navy-950\/80 {
+  background-color: #f8fafc !important;
+}
+
+.light .bg-navy-900 {
+  background-color: #f1f5f9 !important;
+}
+
+.light .bg-navy-900\/50,
+.light .bg-navy-900\/40,
+.light .bg-navy-900\/30,
+.light .bg-navy-900\/20 {
+  background-color: rgba(255, 255, 255, 0.85) !important;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+}
+
+.light .bg-navy-900\/60 {
+  background-color: rgba(241, 245, 249, 0.8) !important;
+}
+
+.light .bg-navy-800 {
+  background-color: #e2e8f0 !important;
+}
+
+.light .bg-navy-800\/60,
+.light .bg-navy-800\/50,
+.light .bg-navy-800\/40 {
+  background-color: rgba(226, 232, 240, 0.6) !important;
+}
+
+/* ---- Border overrides ---- */
+.light .border-navy-800,
+.light .border-navy-800\/60,
+.light .border-navy-800\/40,
+.light .border-navy-800\/30 {
+  border-color: #e2e8f0 !important;
+}
+
+.light .border-navy-700,
+.light .border-navy-700\/60,
+.light .border-navy-700\/50,
+.light .border-navy-700\/40 {
+  border-color: #cbd5e1 !important;
+}
+
+.light .ring-navy-700,
+.light .ring-navy-700\/50 {
+  --tw-ring-color: #cbd5e1 !important;
+}
+
+.light .border-l-navy-700\/40 {
+  border-left-color: #cbd5e1 !important;
+}
+
+.light .divide-navy-800 > :not([hidden]) ~ :not([hidden]) {
+  border-color: #e2e8f0 !important;
+}
+
+/* ---- Text overrides ---- */
+.light .text-white {
+  color: #0f172a !important;
+}
+
+.light .text-navy-50 {
+  color: #0f172a !important;
+}
+
+.light .text-navy-100 {
+  color: #1e293b !important;
+}
+
+.light .text-navy-200 {
+  color: #334155 !important;
+}
+
+.light .text-navy-300 {
+  color: #475569 !important;
+}
+
+.light .text-navy-400 {
+  color: #64748b !important;
+}
+
+.light .text-navy-500 {
+  color: #94a3b8 !important;
+}
+
+.light .text-navy-600 {
+  color: #94a3b8 !important;
+}
+
+/* ---- Header ---- */
+.light header {
+  background-color: rgba(248, 250, 252, 0.85) !important;
+  border-bottom-color: #e2e8f0 !important;
+}
+
+.light header .bg-navy-900 {
+  background-color: #ffffff !important;
+}
+
+.light header .border-navy-700 {
+  border-color: #e2e8f0 !important;
+}
+
+/* ---- Inputs ---- */
+.light input,
+.light select,
+.light textarea {
+  background-color: #ffffff !important;
+  border-color: #e2e8f0 !important;
+  color: #0f172a !important;
+}
+
+.light input::placeholder,
+.light textarea::placeholder {
+  color: #94a3b8 !important;
+}
+
+/* ---- Hover states ---- */
+.light .hover\:bg-navy-800:hover,
+.light .hover\:bg-navy-800\/60:hover,
+.light .hover\:bg-navy-800\/50:hover {
+  background-color: #f1f5f9 !important;
+}
+
+.light .hover\:bg-navy-900:hover,
+.light .hover\:bg-navy-900\/40:hover,
+.light .hover\:bg-navy-900\/30:hover {
+  background-color: #f8fafc !important;
+}
+
+.light .hover\:text-white:hover {
+  color: #0f172a !important;
+}
+
+.light .hover\:text-navy-100:hover {
+  color: #1e293b !important;
+}
+
+/* ---- Accent colors ---- */
+.light .text-accent-400 {
+  color: #2563eb !important;
+}
+
+.light .text-accent-300 {
+  color: #2563eb !important;
+}
+
+.light .bg-accent-600 {
+  background-color: #2563eb !important;
+}
+
+.light .bg-accent-600\/20 {
+  background-color: rgba(37, 99, 235, 0.1) !important;
+}
+
+.light .bg-accent-600\/10 {
+  background-color: rgba(37, 99, 235, 0.06) !important;
+}
+
+.light .bg-accent-950\/40 {
+  background-color: rgba(37, 99, 235, 0.08) !important;
+}
+
+.light .border-accent-500\/20 {
+  border-color: rgba(37, 99, 235, 0.2) !important;
+}
+
+.light .border-accent-800\/40,
+.light .border-accent-900\/40 {
+  border-color: rgba(37, 99, 235, 0.15) !important;
+}
+
+.light .ring-accent-500\/30 {
+  --tw-ring-color: rgba(37, 99, 235, 0.2) !important;
+}
+
+/* ---- Status colors ---- */
+.light .bg-emerald-500\/20,
+.light .bg-emerald-950\/60 {
+  background-color: rgba(16, 185, 129, 0.1) !important;
+}
+
+.light .text-emerald-400,
+.light .text-emerald-300 {
+  color: #059669 !important;
+}
+
+.light .ring-emerald-500\/30 {
+  --tw-ring-color: rgba(16, 185, 129, 0.2) !important;
+}
+
+.light .bg-amber-500\/20 {
+  background-color: rgba(245, 158, 11, 0.1) !important;
+}
+
+.light .text-amber-400,
+.light .text-amber-300 {
+  color: #d97706 !important;
+}
+
+.light .ring-amber-500\/30 {
+  --tw-ring-color: rgba(245, 158, 11, 0.2) !important;
+}
+
+.light .bg-red-500\/20,
+.light .bg-red-500\/10 {
+  background-color: rgba(239, 68, 68, 0.1) !important;
+}
+
+.light .text-red-400,
+.light .text-red-300 {
+  color: #dc2626 !important;
+}
+
+.light .border-red-500\/20 {
+  border-color: rgba(239, 68, 68, 0.2) !important;
+}
+
+/* ---- Agent/Manual badges (purple) ---- */
+.light .bg-purple-500\/15 {
+  background-color: rgba(139, 92, 246, 0.1) !important;
+}
+
+.light .text-purple-400,
+.light .text-purple-300 {
+  color: #7c3aed !important;
+}
+
+.light .text-purple-400\/70 {
+  color: rgba(124, 58, 237, 0.7) !important;
+}
+
+.light .border-purple-500\/30 {
+  border-color: rgba(139, 92, 246, 0.2) !important;
+}
+
+.light .border-l-purple-500\/60 {
+  border-left-color: rgba(139, 92, 246, 0.5) !important;
+}
+
+/* Service card accents */
+.light .bg-purple-900\/40 {
+  background-color: rgba(139, 92, 246, 0.08) !important;
+}
+
+.light .border-purple-800\/40 {
+  border-color: rgba(139, 92, 246, 0.15) !important;
+}
+
+.light .bg-pink-900\/40 {
+  background-color: rgba(236, 72, 153, 0.08) !important;
+}
+
+.light .border-pink-800\/40 {
+  border-color: rgba(236, 72, 153, 0.15) !important;
+}
+
+.light .text-pink-400 {
+  color: #db2777 !important;
+}
+
+/* ---- Footer ---- */
+.light footer {
+  background-color: #f1f5f9 !important;
+}
+
+/* ---- Scrollbar ---- */
+.light ::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+}
+
+.light ::-webkit-scrollbar-track {
+  background: #f1f5f9;
+}
+
+/* ---- Gradient hero ---- */
+.light .bg-gradient-to-b.from-navy-950 {
+  background-image: linear-gradient(to bottom, #f8fafc, #f1f5f9, #f8fafc) !important;
+}
+
+/* ---- Login page ---- */
+.light .bg-navy-950.min-h-screen {
+  background-color: #f8fafc !important;
+}
+
+/* ---- Shadows ---- */
+.light .shadow-2xl {
+  box-shadow: 0 25px 50px -12px rgba(0,0,0,0.1) !important;
+}
+
+.light .shadow-black\/30,
+.light .shadow-black\/50 {
+  --tw-shadow-color: rgba(0,0,0,0.05) !important;
+}
+
+/* ---- Cards ---- */
+.light .rounded-xl.border {
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+}
+
+/* ---- Dropdown menus ---- */
+.light .bg-navy-900.shadow-2xl,
+.light .rounded-xl.border.border-navy-700.bg-navy-900 {
+  background-color: #ffffff !important;
+  border-color: #e2e8f0 !important;
+  box-shadow: 0 10px 40px rgba(0,0,0,0.12) !important;
+}
+
+/* ---- Mobile menu ---- */
+.light .lg\:hidden.border-t.border-navy-800.bg-navy-950 {
+  background-color: #f8fafc !important;
+}
+
+/* ---- Hero gradient headline ---- */
+.light h1[style*="background-clip"] {
+  background: linear-gradient(135deg, #0f172a 0%, #1e40af 40%, #7c3aed 70%, #db2777 100%) !important;
+  background-size: 200% 200% !important;
+  -webkit-background-clip: text !important;
+  -webkit-text-fill-color: transparent !important;
+  background-clip: text !important;
+}
+
+/* ---- Badge/tag in hero ---- */
+.light .bg-navy-900\/60.border-navy-700\/40 {
+  background-color: rgba(241, 245, 249, 0.9) !important;
+  border-color: #e2e8f0 !important;
+}
+
+/* ---- Stat counter cards ---- */
+.light .bg-navy-900\/40.border.border-navy-800\/60 {
+  background-color: #ffffff !important;
+  border-color: #e2e8f0 !important;
+}

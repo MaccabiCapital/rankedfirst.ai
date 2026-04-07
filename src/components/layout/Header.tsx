@@ -146,8 +146,18 @@ function ThemeToggle() {
   const [isDark, setIsDark] = React.useState(true);
 
   React.useEffect(() => {
-    const root = document.documentElement;
-    setIsDark(root.classList.contains("dark"));
+    const stored = localStorage.getItem("rankedfirst-theme");
+    if (stored === "light") {
+      document.documentElement.classList.remove("dark");
+      document.documentElement.classList.add("light");
+      setIsDark(false);
+    } else if (stored === "dark") {
+      document.documentElement.classList.remove("light");
+      document.documentElement.classList.add("dark");
+      setIsDark(true);
+    } else {
+      setIsDark(document.documentElement.classList.contains("dark"));
+    }
   }, []);
 
   const toggle = () => {
@@ -155,9 +165,11 @@ function ThemeToggle() {
     if (isDark) {
       root.classList.remove("dark");
       root.classList.add("light");
+      localStorage.setItem("rankedfirst-theme", "light");
     } else {
       root.classList.remove("light");
       root.classList.add("dark");
+      localStorage.setItem("rankedfirst-theme", "dark");
     }
     setIsDark(!isDark);
   };

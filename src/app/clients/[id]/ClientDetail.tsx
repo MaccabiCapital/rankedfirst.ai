@@ -256,10 +256,21 @@ function StageSection({
   const ownerLabel = stage.owner === "Both" ? "Agent + Human" : stage.owner;
 
   function renderTask(task: WorkflowTask) {
+    const isAgent = task.assigneeType === "Agent";
+    const agentBadge = isAgent
+      ? "bg-purple-500/15 border-purple-500/30 text-purple-300"
+      : "bg-navy-800/60 border-navy-700/50 text-navy-300";
+    const agentIcon = isAgent
+      ? "text-purple-400"
+      : "text-navy-500";
+    const leftBorder = isAgent
+      ? "border-l-2 border-l-purple-500/60"
+      : "border-l-2 border-l-navy-700/40";
+
     return (
       <div
         key={task.id}
-        className="flex items-center gap-3 px-5 py-3 border-b border-navy-800/30 last:border-0 hover:bg-navy-900/30 transition-colors"
+        className={`flex items-start sm:items-center gap-3 px-5 py-3 border-b border-navy-800/30 last:border-0 hover:bg-navy-900/30 transition-colors ${leftBorder}`}
       >
         <button
           type="button"
@@ -270,20 +281,25 @@ function StageSection({
           {task.status}
         </button>
         <div className="flex-1 min-w-0">
-          <span className={`text-sm ${task.status === "Done" ? "text-navy-500 line-through" : "text-navy-100"}`}>
-            {task.name}
-          </span>
-          {task.notes && (
-            <span className="ml-2 text-[10px] text-navy-600 font-mono">{task.notes}</span>
-          )}
-        </div>
-        <div className="hidden sm:flex items-center gap-1.5 shrink-0">
-          <span className="text-navy-500">
-            {task.assigneeType === "Agent" ? <BotIcon /> : <PersonIcon />}
-          </span>
-          <span className="text-xs text-navy-400 font-mono max-w-[140px] truncate">
-            {task.assigneeName}
-          </span>
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className={`text-sm ${task.status === "Done" ? "text-navy-500 line-through" : "text-navy-100"}`}>
+              {task.name}
+            </span>
+            <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[10px] font-mono font-medium ${agentBadge}`}>
+              <span className={agentIcon}>
+                {isAgent ? <BotIcon /> : <PersonIcon />}
+              </span>
+              {isAgent ? "Agent" : "Manual"}
+            </span>
+          </div>
+          <div className="flex items-center gap-2 mt-0.5">
+            <span className={`text-xs font-mono ${isAgent ? "text-purple-400/70" : "text-navy-500"}`}>
+              {task.assigneeName}
+            </span>
+            {task.notes && (
+              <span className="text-[10px] text-navy-600 font-mono">{task.notes}</span>
+            )}
+          </div>
         </div>
         <span className="text-xs font-mono text-navy-500 shrink-0">
           {formatDate(task.dueDate)}
@@ -502,9 +518,19 @@ export default function ClientDetail() {
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
           {/* Main content — 7-Stage Pipeline */}
           <div className="lg:col-span-3 space-y-3">
-            <h2 className="font-display text-sm font-semibold text-navy-300 uppercase tracking-wider mb-3">
-              Workflow Pipeline
-            </h2>
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="font-display text-sm font-semibold text-navy-300 uppercase tracking-wider">
+                Workflow Pipeline
+              </h2>
+              <div className="flex items-center gap-3">
+                <span className="inline-flex items-center gap-1.5 text-[11px] font-mono text-purple-400">
+                  <span className="w-2 h-2 rounded-sm bg-purple-500/60" /> Agent tasks ({allTasks.filter(t => t.assigneeType === 'Agent').length})
+                </span>
+                <span className="inline-flex items-center gap-1.5 text-[11px] font-mono text-navy-400">
+                  <span className="w-2 h-2 rounded-sm bg-navy-600" /> Manual tasks ({allTasks.filter(t => t.assigneeType === 'Human').length})
+                </span>
+              </div>
+            </div>
             {client.stages.map((stage) => (
               <StageSection
                 key={stage.id}
