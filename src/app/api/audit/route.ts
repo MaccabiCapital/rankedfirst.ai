@@ -255,7 +255,9 @@ interface LighthouseData {
 async function fetchPageSpeed(url: string): Promise<LighthouseData | null> {
   try {
     const encoded = encodeURIComponent(url);
-    const apiUrl = `https://www.googleapis.com/pagespeedonline/v5/runPagespeed?url=${encoded}&category=seo&category=performance&category=accessibility&category=best-practices&strategy=mobile`;
+    const psiKey = process.env.GOOGLE_PSI_API_KEY;
+    const keyParam = psiKey ? `&key=${psiKey}` : "";
+    const apiUrl = `https://www.googleapis.com/pagespeedonline/v5/runPagespeed?url=${encoded}&category=seo&category=performance&category=accessibility&category=best-practices&strategy=mobile${keyParam}`;
     const res = await fetch(apiUrl, { signal: AbortSignal.timeout(60000) });
     if (!res.ok) { console.error("[PSI] HTTP", res.status); return null; }
     const json = await res.json();
@@ -283,8 +285,12 @@ async function fetchPageSpeed(url: string): Promise<LighthouseData | null> {
 // ─── Open PageRank ───────────────────────────────────────────────────
 async function fetchPageRank(domain: string): Promise<number | null> {
   try {
+    const oprKey = process.env.OPENPAGERANK_API_KEY;
+    const headers: Record<string, string> = {};
+    if (oprKey) headers["API-OPR"] = oprKey;
     const res = await fetch(`https://openpagerank.com/api/v1.0/getPageRank?domains[]=${encodeURIComponent(domain)}`, {
       signal: AbortSignal.timeout(10000),
+      headers,
     });
     if (!res.ok) return null;
     const json = await res.json();
@@ -592,13 +598,15 @@ function buildReport(
   const rankingsScore = geoGrid ? clamp(geoGrid.solv * 100) : 0;
 
   // ── Listings section ─────────────────────────────────────────────
-  const checkedDirs = directories.filter((d) => d.found !== null);
-  const foundDirs = directories.filter((d) => d.found === true);
-  const napConsistentDirs = directories.filter((d) => d.napCorrect === true);
+  // Filter out unknowns (null = directory blocked us, don't penalize)
+  const knownDirs = directories.filter((d) => d.found !== null);
+  const foundDirs = knownDirs.filter((d) => d.found === true);
+  const napConsistentDirs = foundDirs.filter((d) => d.napCorrect === true);
   const napErrorDirs = foundDirs.filter((d) => d.napCorrect === false);
+  const notFoundDirs = knownDirs.filter((d) => d.found === false);
 
-  const listingsScore = checkedDirs.length > 0
-    ? clamp((foundDirs.length / checkedDirs.length) * (napConsistentDirs.length > 0 ? napConsistentDirs.length / Math.max(foundDirs.length, 1) : 1) * 100)
+  const listingsScore = knownDirs.length > 0
+    ? clamp((foundDirs.length / knownDirs.length) * (napConsistentDirs.length > 0 ? napConsistentDirs.length / Math.max(foundDirs.length, 1) : 1) * 100)
     : 0;
 
   // ── Reviews section ──────────────────────────────────────────────
@@ -682,14 +690,19 @@ function buildReport(
   );
 
   // ── Overall Score ────────────────────────────────────────────────
-  const weights = { rankings: 0.20, listings: 0.15, reviews: 0.20, gbp: 0.15, onSite: 0.15, authority: 0.15 };
+  // Only average sections that have real data — don't let nulls drag score to 0
+  const scoredSections: Array<{ score: number; weight: number }> = [];
+  scoredSections.push({ score: rankingsScore, weight: 0.20 });
+  if (knownDirs.length > 0) scoredSections.push({ score: listingsScore, weight: 0.15 });
+  if (reviewsScore > 0) scoredSections.push({ score: reviewsScore, weight: 0.20 });
+  scoredSections.push({ score: gbpScore, weight: 0.15 });
+  if (lighthouse) scoredSections.push({ score: onSiteScore, weight: 0.15 });
+  if (authorityScore > 0 || pageRank !== null || indexedPages !== null) scoredSections.push({ score: authorityScore, weight: 0.15 });
+
+  // Normalize weights to sum to 1.0
+  const totalWeight = scoredSections.reduce((s, sec) => s + sec.weight, 0);
   const overallScore = clamp(
-    rankingsScore * weights.rankings +
-    listingsScore * weights.listings +
-    reviewsScore * weights.reviews +
-    gbpScore * weights.gbp +
-    onSiteScore * weights.onSite +
-    authorityScore * weights.authority
+    scoredSections.reduce((s, sec) => s + sec.score * (sec.weight / totalWeight), 0)
   );
 
   const sections = [
@@ -706,10 +719,10 @@ function buildReport(
     rankings: { geoGrid, organicKeywords: organicKws },
     listings: {
       found: foundDirs.length,
-      notFound: checkedDirs.length - foundDirs.length,
+      notFound: notFoundDirs.length,
       napConsistent: napConsistentDirs.length,
       napErrors: napErrorDirs.length,
-      directories,
+      directories: knownDirs, // Only return directories where we got a definitive answer
     },
     reviews: reviewsData,
     gbpProfile: { business: gbpBiz, competitors },
