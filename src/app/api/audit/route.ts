@@ -757,7 +757,29 @@ function buildReport(
     }));
 
   // ── On-Site SEO section ──────────────────────────────────────────
-  const onSiteScore = lighthouse ? lighthouse.seoScore : 0;
+  // On-Site SEO: use Lighthouse if available, otherwise compute from our own HTML analysis
+  let onSiteScore = 0;
+  if (lighthouse) {
+    onSiteScore = lighthouse.seoScore;
+  } else if (technical) {
+    // Compute score from 12 technical checks (each worth ~8 points)
+    const checks = [
+      technical.hasHttps,           // HTTPS
+      technical.hasMetaDescription, // Meta description
+      technical.hasH1,              // H1 tag
+      technical.hasSchema,          // Schema markup
+      technical.hasViewport,        // Mobile viewport
+      technical.hasCanonical,       // Canonical tag
+      technical.hasRobotsTxt,       // robots.txt
+      technical.hasSitemap,         // Sitemap
+      technical.hasNapOnSite,       // NAP on website
+      technical.hasGa4,             // Analytics installed
+      technical.titleLength > 0 && technical.titleLength <= 60,  // Title tag present & right length
+      technical.imagesWithAlt >= technical.imagesWithoutAlt,      // More images with alt than without
+    ];
+    const passed = checks.filter(Boolean).length;
+    onSiteScore = clamp(Math.round((passed / checks.length) * 100));
+  }
 
   // ── Authority section ────────────────────────────────────────────
   const competitorComparison = competitorKeywordSets.map((cs, i) => ({
@@ -788,7 +810,7 @@ function buildReport(
   if (knownDirs.length > 0) scoredSections.push({ score: listingsScore, weight: 0.15 });
   if (reviewsScore > 0) scoredSections.push({ score: reviewsScore, weight: 0.20 });
   scoredSections.push({ score: gbpScore, weight: 0.15 });
-  if (lighthouse) scoredSections.push({ score: onSiteScore, weight: 0.15 });
+  if (onSiteScore > 0) scoredSections.push({ score: onSiteScore, weight: 0.15 });
   if (authorityScore > 0 || pageRank !== null || indexedPages !== null) scoredSections.push({ score: authorityScore, weight: 0.15 });
 
   // Normalize weights to sum to 1.0

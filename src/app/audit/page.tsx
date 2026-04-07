@@ -704,9 +704,14 @@ export default function AuditPage() {
                       </div>
                     </div>
                   </>
+                ) : report.onSiteSeo.technical ? (
+                  <div className="bg-navy-900 border border-navy-800 rounded-xl p-6">
+                    <h3 className="font-display font-bold text-lg text-white mb-2">On-Site SEO Analysis</h3>
+                    <p className="text-sm text-navy-400 mb-4">Based on 12 technical checks of your website. Scores reflect what we found when analyzing your homepage.</p>
+                  </div>
                 ) : (
                   <div className="bg-navy-900 border border-navy-800 rounded-xl p-10 text-center">
-                    <p className="text-navy-400">No Lighthouse data — provide a website URL to enable this analysis.</p>
+                    <p className="text-navy-400">Provide a website URL to enable on-site SEO analysis.</p>
                   </div>
                 )}
 
