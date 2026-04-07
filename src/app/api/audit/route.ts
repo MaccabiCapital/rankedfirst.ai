@@ -23,7 +23,7 @@ function getDFSAuth(): string {
   return "Basic " + Buffer.from(`${login}:${password}`).toString("base64");
 }
 
-async function callDFS(path: string, body: unknown[], timeoutMs = 30000): Promise<any> {
+async function callDFS(path: string, body: unknown[], timeoutMs = 7000): Promise<any> {
   const res = await fetch(`${DFS_BASE}${path}`, {
     method: "POST",
     headers: { Authorization: getDFSAuth(), "Content-Type": "application/json" },
@@ -42,7 +42,7 @@ async function callDFS(path: string, body: unknown[], timeoutMs = 30000): Promis
   return json;
 }
 
-async function safeDFS(path: string, body: unknown[], timeoutMs = 30000): Promise<any> {
+async function safeDFS(path: string, body: unknown[], timeoutMs = 7000): Promise<any> {
   try {
     return await callDFS(path, body, timeoutMs);
   } catch (e) {
@@ -61,48 +61,52 @@ function dfsFirstItem(response: any): any {
 }
 
 // ─── Location Resolution ─────────────────────────────────────────────
-async function resolveLocation(location: string): Promise<{ code: number | null; name: string }> {
-  try {
-    const res = await fetch(`${DFS_BASE}/serp/google/locations`, {
-      method: "GET",
-      headers: { Authorization: getDFSAuth() },
-      signal: AbortSignal.timeout(10000),
-    });
-    const json = await res.json();
-    const locations: any[] = json.tasks?.[0]?.result ?? [];
-    const normalized = location.toLowerCase().replace(/\s+/g, " ").trim();
-    const parts = normalized.split(",").map((p) => p.trim());
-    const city = parts[0] ?? "";
+// Hardcoded top cities to avoid 5s/67MB DFS locations API call
+const LOCATION_CACHE: Record<string, number> = {
+  "toronto,ontario":1002451,"toronto,on":1002451,"north york,ontario":1002451,"north york,on":1002451,
+  "vancouver,british columbia":1002286,"vancouver,bc":1002286,"calgary,alberta":1002290,"calgary,ab":1002290,
+  "edmonton,alberta":1002300,"edmonton,ab":1002300,"ottawa,ontario":1002443,"ottawa,on":1002443,
+  "montreal,quebec":1002431,"montreal,qc":1002431,"winnipeg,manitoba":1002471,"winnipeg,mb":1002471,
+  "mississauga,ontario":1002425,"mississauga,on":1002425,"brampton,ontario":1002287,"brampton,on":1002287,
+  "hamilton,ontario":1002333,"hamilton,on":1002333,"london,ontario":1002396,"london,on":1002396,
+  "new york,ny":1023191,"new york,new york":1023191,"los angeles,ca":1013962,"los angeles,california":1013962,
+  "chicago,il":1016367,"chicago,illinois":1016367,"houston,tx":1026339,"houston,texas":1026339,
+  "phoenix,az":1013211,"phoenix,arizona":1013211,"san diego,ca":1014003,"san diego,california":1014003,
+  "dallas,tx":1026114,"dallas,texas":1026114,"denver,co":1014330,"denver,colorado":1014330,
+  "austin,tx":1026015,"austin,texas":1026015,"miami,fl":1015116,"miami,florida":1015116,
+  "atlanta,ga":1015254,"atlanta,georgia":1015254,"seattle,wa":1027744,"seattle,washington":1027744,
+  "boston,ma":1018127,"boston,massachusetts":1018127,"san francisco,ca":1014006,"san francisco,california":1014006,
+  "las vegas,nv":1021771,"las vegas,nevada":1021771,"portland,or":1024502,"portland,oregon":1024502,
+  "detroit,mi":1018919,"detroit,michigan":1018919,"minneapolis,mn":1019270,"minneapolis,minnesota":1019270,
+  "tampa,fl":1015196,"tampa,florida":1015196,"orlando,fl":1015150,"orlando,florida":1015150,
+  "charlotte,nc":1022633,"charlotte,north carolina":1022633,"nashville,tn":1025891,"nashville,tennessee":1025891,
+  "philadelphia,pa":1024442,"philadelphia,pennsylvania":1024442,
+  "london,england":1006886,"london,uk":1006886,"manchester,england":1006924,"birmingham,england":1006680,
+  "sydney,new south wales":9069243,"melbourne,victoria":9068949,
+};
 
-    for (const loc of locations) {
-      const locName = (loc.location_name ?? "").toLowerCase();
-      if (locName === normalized) return { code: loc.location_code, name: loc.location_name };
-    }
+function resolveLocation(location: string): { code: number | null; name: string } {
+  const normalized = location.toLowerCase().replace(/\s+/g, " ").trim();
+  const key = normalized.replace(/\s*,\s*/g, ",");
 
-    const matches = locations.filter((loc: any) => {
-      const locName = (loc.location_name ?? "").toLowerCase();
-      return locName.startsWith(city + ",");
-    });
+  // Direct cache hit
+  if (LOCATION_CACHE[key]) return { code: LOCATION_CACHE[key], name: location };
 
-    if (matches.length === 1) return { code: matches[0].location_code, name: matches[0].location_name };
-    if (matches.length > 1 && parts.length > 1) {
-      for (const m of matches) {
-        const locName = (m.location_name ?? "").toLowerCase();
-        if (parts.every((p) => locName.includes(p))) return { code: m.location_code, name: m.location_name };
-      }
-    }
-    // If multiple matches for a single city name (e.g. "Toronto" matches Toronto,ON and Toronto,OH)
-    // pick the first match — DFS returns them roughly by prominence
-    if (matches.length > 0) {
-      console.log(`[audit] Location "${location}" matched ${matches.length} results, using: ${matches[0].location_name}`);
-      return { code: matches[0].location_code, name: matches[0].location_name };
-    }
-    console.warn(`[audit] Could not resolve location "${location}" to a code`);
-    return { code: null, name: location };
-  } catch (e) {
-    console.error("[audit] Location resolution failed:", e);
-    return { code: null, name: location };
+  // Try with just city + state abbreviation
+  const parts = key.split(",");
+  if (parts.length >= 2) {
+    const cityState = `${parts[0].trim()},${parts[1].trim()}`;
+    if (LOCATION_CACHE[cityState]) return { code: LOCATION_CACHE[cityState], name: location };
   }
+
+  // Try matching city against all cached entries
+  const city = parts[0]?.trim() ?? "";
+  for (const [k, code] of Object.entries(LOCATION_CACHE)) {
+    if (k.startsWith(city + ",")) return { code, name: location };
+  }
+
+  console.warn(`[audit] Location "${location}" not in cache, using location_name fallback`);
+  return { code: null, name: location };
 }
 
 // ─── Business Finder ─────────────────────────────────────────────────
@@ -247,7 +251,9 @@ async function fetchPageSpeed(url: string): Promise<LighthouseData | null> {
     const psiKey = process.env.GOOGLE_PSI_API_KEY;
     const keyParam = psiKey ? `&key=${psiKey}` : "";
     const apiUrl = `https://www.googleapis.com/pagespeedonline/v5/runPagespeed?url=${encoded}&category=seo&category=performance&category=accessibility&category=best-practices&strategy=mobile${keyParam}`;
-    const res = await fetch(apiUrl, { signal: AbortSignal.timeout(60000) });
+    // Use 8s timeout — Vercel Hobby has 10s function limit, PSI typically takes 30-50s
+    // On Pro plan this could be 60s but on Hobby it must fail fast to not block the audit
+    const res = await fetch(apiUrl, { signal: AbortSignal.timeout(8000) });
     if (!res.ok) { console.error("[PSI] HTTP", res.status); return null; }
     const json = await res.json();
     const lr = json.lighthouseResult;
@@ -311,9 +317,9 @@ async function analyzeWebsite(url: string, bizAddress: string, bizPhone: string)
     const hostname = new URL(fullUrl).hostname;
 
     const [htmlRes, robotsRes, sitemapRes] = await Promise.allSettled([
-      fetch(fullUrl, { headers: { "User-Agent": BROWSER_UA }, signal: AbortSignal.timeout(10000), redirect: "follow" }),
-      fetch(`${origin}/robots.txt`, { headers: { "User-Agent": BROWSER_UA }, signal: AbortSignal.timeout(5000) }),
-      fetch(`${origin}/sitemap.xml`, { headers: { "User-Agent": BROWSER_UA }, signal: AbortSignal.timeout(5000) }),
+      fetch(fullUrl, { headers: { "User-Agent": BROWSER_UA }, signal: AbortSignal.timeout(5000), redirect: "follow" }),
+      fetch(`${origin}/robots.txt`, { headers: { "User-Agent": BROWSER_UA }, signal: AbortSignal.timeout(3000) }),
+      fetch(`${origin}/sitemap.xml`, { headers: { "User-Agent": BROWSER_UA }, signal: AbortSignal.timeout(3000) }),
     ]);
 
     const html = htmlRes.status === "fulfilled" && htmlRes.value.ok ? await htmlRes.value.text() : "";
@@ -453,7 +459,7 @@ async function checkDirectories(
       try {
         const res = await fetch(dir.url, {
           headers: { "User-Agent": BROWSER_UA },
-          signal: AbortSignal.timeout(5000),
+          signal: AbortSignal.timeout(3000),
           redirect: "follow",
         });
         if (!res.ok) return { name: dir.name, url: dir.url, found: null, napCorrect: null, claimed: null };
@@ -1018,7 +1024,7 @@ export async function POST(request: NextRequest) {
     console.log(`[audit] Starting audit for "${business_name}" in "${location}" (keyword: "${kw}")`);
 
     // ─── Step 1: Resolve location ───────────────────────────────────
-    const loc = await resolveLocation(location);
+    const loc = resolveLocation(location);
     console.log(`[audit] Resolved location: ${loc.name} (code: ${loc.code})`);
 
     const mapsLocationParam = loc.code ? { location_code: loc.code } : { location_name: loc.name };
@@ -1040,8 +1046,9 @@ export async function POST(request: NextRequest) {
             limit: 50, order_by: ["ranked_serp_element.serp_item.rank_group,asc"],
           }])
         : Promise.resolve(null),
-      // 3. PageSpeed Insights (if website)
-      fullUrl ? fetchPageSpeed(fullUrl) : Promise.resolve(null),
+      // 3. PageSpeed Insights — DISABLED: takes 30-50s, exceeds Vercel Hobby 10s limit
+      // Enable when on Vercel Pro or Railway. Score computed from technical checks instead.
+      Promise.resolve(null),
       // 4. Open PageRank (if website)
       domain ? fetchPageRank(domain) : Promise.resolve(null),
     ];
