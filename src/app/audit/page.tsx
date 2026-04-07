@@ -159,7 +159,8 @@ type TabKey = "rankings" | "listings" | "reviews" | "gbp" | "onsite" | "authorit
 // ─── Main Page ───────────────────────────────────────────────────────
 export default function AuditPage() {
   const [businessName, setBusinessName] = useState("");
-  const [location, setLocation] = useState("");
+  const [city, setCity] = useState("");
+  const [stateProvince, setStateProvince] = useState("");
   const [keyword, setKeyword] = useState("");
   const [websiteUrl, setWebsiteUrl] = useState("");
   const [loading, setLoading] = useState(false);
@@ -178,7 +179,7 @@ export default function AuditPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          business_name: businessName, location,
+          business_name: businessName, location: stateProvince ? `${city}, ${stateProvince}` : city,
           keyword: keyword || undefined, website_url: websiteUrl || undefined,
         }),
       });
@@ -234,22 +235,26 @@ export default function AuditPage() {
       <section className="pb-16">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <form onSubmit={runAudit} className="bg-navy-900 border border-navy-800 rounded-2xl p-6 md:p-8">
-            <div className="grid md:grid-cols-2 gap-5">
-              <div>
+            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-5">
+              <div className="lg:col-span-2">
                 <label className="block text-sm font-mono font-medium text-navy-300 mb-2">Business Name <span className="text-red-400">*</span></label>
                 <input type="text" required value={businessName} onChange={(e) => setBusinessName(e.target.value)} placeholder="e.g. Morrison Plumbing" className="w-full px-4 py-3 bg-navy-950 border border-navy-700 rounded-lg text-white placeholder:text-navy-500 font-body focus:outline-none focus:ring-2 focus:ring-accent-500 focus:border-transparent" />
               </div>
               <div>
-                <label className="block text-sm font-mono font-medium text-navy-300 mb-2">Location <span className="text-red-400">*</span></label>
-                <input type="text" required value={location} onChange={(e) => setLocation(e.target.value)} placeholder="e.g. Denver, CO" className="w-full px-4 py-3 bg-navy-950 border border-navy-700 rounded-lg text-white placeholder:text-navy-500 font-body focus:outline-none focus:ring-2 focus:ring-accent-500 focus:border-transparent" />
+                <label className="block text-sm font-mono font-medium text-navy-300 mb-2">Website URL <span className="text-navy-500">(optional)</span></label>
+                <input type="text" value={websiteUrl} onChange={(e) => setWebsiteUrl(e.target.value)} placeholder="e.g. morrisonplumbing.com" className="w-full px-4 py-3 bg-navy-950 border border-navy-700 rounded-lg text-white placeholder:text-navy-500 font-body focus:outline-none focus:ring-2 focus:ring-accent-500 focus:border-transparent" />
+              </div>
+              <div>
+                <label className="block text-sm font-mono font-medium text-navy-300 mb-2">City <span className="text-red-400">*</span></label>
+                <input type="text" required value={city} onChange={(e) => setCity(e.target.value)} placeholder="e.g. Denver" className="w-full px-4 py-3 bg-navy-950 border border-navy-700 rounded-lg text-white placeholder:text-navy-500 font-body focus:outline-none focus:ring-2 focus:ring-accent-500 focus:border-transparent" />
+              </div>
+              <div>
+                <label className="block text-sm font-mono font-medium text-navy-300 mb-2">State / Province <span className="text-red-400">*</span></label>
+                <input type="text" required value={stateProvince} onChange={(e) => setStateProvince(e.target.value)} placeholder="e.g. CO or Ontario" className="w-full px-4 py-3 bg-navy-950 border border-navy-700 rounded-lg text-white placeholder:text-navy-500 font-body focus:outline-none focus:ring-2 focus:ring-accent-500 focus:border-transparent" />
               </div>
               <div>
                 <label className="block text-sm font-mono font-medium text-navy-300 mb-2">Primary Keyword <span className="text-navy-500">(optional)</span></label>
                 <input type="text" value={keyword} onChange={(e) => setKeyword(e.target.value)} placeholder="e.g. plumber" className="w-full px-4 py-3 bg-navy-950 border border-navy-700 rounded-lg text-white placeholder:text-navy-500 font-body focus:outline-none focus:ring-2 focus:ring-accent-500 focus:border-transparent" />
-              </div>
-              <div>
-                <label className="block text-sm font-mono font-medium text-navy-300 mb-2">Website URL <span className="text-navy-500">(optional)</span></label>
-                <input type="text" value={websiteUrl} onChange={(e) => setWebsiteUrl(e.target.value)} placeholder="e.g. https://morrisonplumbing.com" className="w-full px-4 py-3 bg-navy-950 border border-navy-700 rounded-lg text-white placeholder:text-navy-500 font-body focus:outline-none focus:ring-2 focus:ring-accent-500 focus:border-transparent" />
               </div>
             </div>
             <div className="mt-6 flex items-center gap-4">
