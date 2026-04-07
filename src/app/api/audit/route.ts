@@ -1097,8 +1097,58 @@ export async function POST(request: NextRequest) {
         : Promise.resolve([]),
     ];
 
-    const [geoGridData, reviewsApiData, indexedPages, directories, technicalData, keywordDiscovery] =
+    const [geoGridData, reviewsApiData, indexedPages, directories, technicalData, initialKeywordDiscovery] =
       await Promise.all(wave2) as [GeoGridData | null, ReviewsData | null, number | null, DirectoryResult[], TechnicalData | null, KeywordDiscoveryResult[]];
+    let keywordDiscovery = initialKeywordDiscovery;
+
+    // ─── Wave 2.5: Extra keyword discovery from website + competitor data ───
+    // If initial keyword discovery found nothing, try more sources now that we have technical data
+    const initialKwFound = keywordDiscovery.some((k) => k.found);
+    if (!initialKwFound && businessMatch.found) {
+      const extraCandidates: Array<{ keyword: string; source: string }> = [];
+      const seenKws = new Set(kwsToCheck.map((k) => k.keyword.toLowerCase()));
+      seenKws.add(kw.toLowerCase());
+
+      const addExtra = (k: string, src: string) => {
+        const norm = k.toLowerCase().trim();
+        if (norm.length < 3 || norm.length > 50 || seenKws.has(norm)) return;
+        seenKws.add(norm);
+        extraCandidates.push({ keyword: `${k} ${city}`, source: src });
+      };
+
+      // Website title keywords
+      if (technicalData?.titleTag) {
+        const parts = technicalData.titleTag.split(/[|\-\u2013\u2014,]/).map((p: string) => p.trim()).filter((p: string) => p.length > 3 && p.length < 40);
+        for (const part of parts.slice(0, 3)) {
+          if (part.toLowerCase() !== (biz?.title ?? "").toLowerCase()) addExtra(part, "website");
+        }
+      }
+
+      // Meta description first phrase
+      if (technicalData?.metaDescription) {
+        const first = technicalData.metaDescription.split(/[.!?]/)[0]?.trim();
+        if (first && first.length > 10 && first.length < 50) addExtra(first, "meta");
+      }
+
+      // Competitor categories from geo-grid (these businesses ARE ranking)
+      if (geoGridData?.topCompetitors) {
+        // The competitor names often contain service keywords
+        for (const comp of geoGridData.topCompetitors.slice(0, 3)) {
+          // Extract service type from competitor name (e.g. "Website Developer and Designer in Toronto" -> "Website Developer")
+          const name = comp.name.replace(/ in .*$/i, "").replace(/ (?:of|for|near) .*$/i, "").trim();
+          if (name.length > 3 && name.length < 40) addExtra(name, "competitor");
+        }
+      }
+
+      const extraToCheck = extraCandidates.slice(0, 5);
+      if (extraToCheck.length > 0) {
+        console.log(`[audit] Extra keyword discovery: ${extraToCheck.length} candidates`);
+        const extraResults = await discoverRankableKeywords(extraToCheck, business_name, mapsLocationParam).catch(() => []);
+        keywordDiscovery = [...keywordDiscovery, ...extraResults];
+        const totalFound = keywordDiscovery.filter((k) => k.found).length;
+        console.log(`[audit] Total keyword discovery: ${totalFound}/${keywordDiscovery.length} found`);
+      }
+    }
 
     if (geoGridData) {
       const found = geoGridData.gridResults.filter((r) => r.found).length;

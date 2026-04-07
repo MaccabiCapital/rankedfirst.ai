@@ -319,7 +319,7 @@ export default function AuditPage() {
                 {report.rankings.geoGrid ? (
                   <div className="bg-navy-900 border border-navy-800 rounded-xl p-6">
                     <h3 className="font-display font-bold text-lg text-white mb-1">Local Pack Geo-Grid</h3>
-                    <p className="text-sm text-navy-400 mb-4">3×3 grid showing your rank at 9 points around your business location</p>
+                    <p className="text-sm text-navy-400 mb-4">Each square represents a geographic point near your business. Green = you appear in Google's top 3 results. Amber = positions 4-10. Red = not visible. This shows how customers in different parts of the city see you.</p>
                     <div className="flex flex-col md:flex-row items-center gap-8">
                       <div className="grid grid-cols-3 gap-2.5">
                         {report.rankings.geoGrid.gridResults.map((r, i) => {
