@@ -259,12 +259,18 @@ function buildScorecard(
   const top20Keywords = rankedKeywords.filter((k: any) => k.position <= 20).length;
 
   // ─── 1. Local Pack Ranking ──────────────────────────────────────
+  // rank reflects keyword search position, NOT name search
   let rankScore = 0;
   let rankDetail = "";
 
   if (businessMatch.found && businessMatch.rank > 0) {
+    // Found in keyword-based Maps search — real local pack ranking
     rankScore = clampScore(Math.max(100 - (businessMatch.rank - 1) * 15, 10));
-    rankDetail = `Position #${businessMatch.rank} in local pack`;
+    rankDetail = `Position #${businessMatch.rank} in local pack for target keyword`;
+  } else if (businessMatch.found && businessMatch.rank === 0) {
+    // Business exists (found by name) but doesn't rank in keyword search
+    rankScore = 5;
+    rankDetail = "Has GBP but not ranking in local pack for target keyword";
   } else if (!businessMatch.found && mapsItems.length > 0) {
     rankScore = 0;
     rankDetail = "Not found in local map pack";
@@ -280,11 +286,9 @@ function buildScorecard(
 
   // Enrich with organic ranking data if available
   if (totalRankedKeywords > 0) {
-    // Give partial credit for organic keyword rankings even if not in map pack
-    const organicBonus = Math.min(top10Keywords * 15 + top20Keywords * 5, 40);
-    if (rankScore === 0) {
-      rankScore = clampScore(organicBonus);
-    }
+    // Small bonus for organic rankings, capped low — this dimension is about local pack
+    const organicBonus = Math.min(top10Keywords * 5 + top20Keywords * 2, 15);
+    rankScore = clampScore(rankScore + organicBonus);
     rankDetail += ` · ${totalRankedKeywords} organic keywords (${top10Keywords} in top 10)`;
   }
 
@@ -901,17 +905,19 @@ export async function POST(request: NextRequest) {
     // ─── Step 3: Find our business + merge competitor data ─────────
     const mapsNameItems = dfsItems(mapsNameData);
     const mapsKwItems = dfsItems(mapsKwData);
-    const businessMatch = findBusinessInMaps(mapsNameItems, business_name);
 
-    // Also check keyword results for the business
-    if (!businessMatch.found) {
-      const kwMatch = findBusinessInMaps(mapsKwItems, business_name);
-      if (kwMatch.found) {
-        businessMatch.item = kwMatch.item;
-        businessMatch.rank = kwMatch.rank;
-        businessMatch.found = true;
-      }
-    }
+    // Check keyword Maps first — this rank matters for "Local Pack Ranking"
+    const kwMatch = findBusinessInMaps(mapsKwItems, business_name);
+    // Also check name Maps to confirm the business exists on Google
+    const nameMatch = findBusinessInMaps(mapsNameItems, business_name);
+
+    // businessMatch.rank should reflect keyword ranking, not name ranking
+    // Name search rank is meaningless (searching your own name always returns you #1)
+    const businessMatch: BusinessMatch = kwMatch.found
+      ? kwMatch                       // Found in keyword search — real ranking
+      : nameMatch.found
+        ? { ...nameMatch, rank: 0 }   // Found by name only — exists but doesn't rank for keyword
+        : { item: null, rank: 0, found: false };
 
     // Merge both result sets for competitor data, dedup by title
     const seenTitles = new Set<string>();
