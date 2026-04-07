@@ -805,7 +805,7 @@ function buildReport(
   // ── Opportunities section ────────────────────────────────────────
   const topComp = competitors[0];
   const opportunities = buildOpportunities(
-    gbpBiz, topComp, reviewsData, lighthouse, technical, ownKeywords,
+    gbpBiz, topComp, competitors, reviewsData, lighthouse, technical, ownKeywords,
     competitorKeywordSets, directories,
   );
 
@@ -881,7 +881,7 @@ function buildReport(
 
 // ─── Opportunities Builder ───────────────────────────────────────────
 function buildOpportunities(
-  gbpBiz: any, topComp: any,
+  gbpBiz: any, topComp: any, allComps: any[],
   reviewsData: ReviewsData | null,
   lighthouse: LighthouseData | null,
   technical: TechnicalData | null,
@@ -891,26 +891,28 @@ function buildOpportunities(
 ) {
   const opps: Record<string, any> = {};
 
-  // Review gap
-  if (gbpBiz && topComp) {
+  // Review gap — compare against competitor with MOST reviews, not just the first one
+  if (gbpBiz && allComps.length > 0) {
     const yours = gbpBiz.reviewCount;
-    const theirs = topComp.reviewCount ?? 0;
+    const bestComp = allComps.reduce((best: any, c: any) => (c.reviewCount ?? 0) > (best.reviewCount ?? 0) ? c : best, allComps[0]);
+    const theirs = bestComp.reviewCount ?? 0;
     if (theirs > yours) {
       opps.reviewGap = {
         yours, topCompetitor: theirs, gap: theirs - yours,
-        action: `You need ${theirs - yours} more reviews to match ${topComp.name}. Implement a review request workflow.`,
+        action: `You need ${theirs - yours} more reviews to match ${bestComp.name} (${theirs} reviews). Implement a review request workflow.`,
       };
     }
   }
 
-  // Photo gap
-  if (gbpBiz && topComp) {
+  // Photo gap — compare against competitor with MOST photos
+  if (gbpBiz && allComps.length > 0) {
     const yours = gbpBiz.totalPhotos;
-    const theirs = topComp.totalPhotos ?? 0;
+    const bestPhotoComp = allComps.reduce((best: any, c: any) => (c.totalPhotos ?? 0) > (best.totalPhotos ?? 0) ? c : best, allComps[0]);
+    const theirs = bestPhotoComp.totalPhotos ?? 0;
     if (theirs > yours) {
       opps.photoGap = {
         yours, topCompetitor: theirs, gap: theirs - yours,
-        action: `Add ${theirs - yours} more photos to your GBP. Businesses with 100+ photos get 520% more calls.`,
+        action: `Add ${theirs - yours} more photos to your GBP to match ${bestPhotoComp.name}. Businesses with 100+ photos get 520% more calls.`,
       };
     }
   }
