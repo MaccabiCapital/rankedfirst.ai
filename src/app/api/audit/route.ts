@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
-export const maxDuration = 180;
+export const maxDuration = 300;
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
