@@ -787,7 +787,7 @@ async function callClaude(systemPrompt: string, userMessage: string): Promise<an
     },
     body: JSON.stringify({
       model: "claude-sonnet-4-20250514",
-      max_tokens: 8000,
+      max_tokens: 12000,
       messages: [{ role: "user", content: userMessage }],
       system: systemPrompt,
     }),
@@ -803,17 +803,42 @@ async function callClaude(systemPrompt: string, userMessage: string): Promise<an
   const json = await response.json();
   const text = json.content?.[0]?.text ?? "";
 
-  // Extract JSON from response (Claude sometimes wraps in ```json blocks)
+  // Extract JSON from response — Claude may wrap in ```json, add commentary, or truncate
   let cleaned = text.trim();
+
+  // Strip markdown code fences
   if (cleaned.startsWith("```")) {
     cleaned = cleaned.replace(/^```(?:json)?\s*\n?/, "").replace(/\n?```\s*$/, "");
   }
 
+  // Try direct parse first
   try {
     return JSON.parse(cleaned);
-  } catch (e) {
-    console.error("[Claude] JSON parse error. Raw response:", text.slice(0, 500));
-    throw new Error("Claude returned invalid JSON");
+  } catch {
+    // Try to extract the outermost JSON object
+    const firstBrace = cleaned.indexOf("{");
+    const lastBrace = cleaned.lastIndexOf("}");
+    if (firstBrace !== -1 && lastBrace > firstBrace) {
+      try {
+        return JSON.parse(cleaned.slice(firstBrace, lastBrace + 1));
+      } catch {
+        // JSON might be truncated at token limit — try to repair
+        let partial = cleaned.slice(firstBrace, lastBrace + 1);
+        // Close any unclosed strings, arrays, objects
+        const openBraces = (partial.match(/\{/g) || []).length;
+        const closeBraces = (partial.match(/\}/g) || []).length;
+        const openBrackets = (partial.match(/\[/g) || []).length;
+        const closeBrackets = (partial.match(/\]/g) || []).length;
+        partial += "]".repeat(Math.max(0, openBrackets - closeBrackets));
+        partial += "}".repeat(Math.max(0, openBraces - closeBraces));
+        try {
+          return JSON.parse(partial);
+        } catch { /* fall through */ }
+      }
+    }
+    console.error("[Claude] JSON parse error. Raw length:", text.length, "First 1000 chars:", text.slice(0, 1000));
+    console.error("[Claude] Last 500 chars:", text.slice(-500));
+    throw new Error("Claude returned invalid JSON — response may have been truncated");
   }
 }
 
