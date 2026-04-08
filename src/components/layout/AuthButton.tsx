@@ -11,6 +11,7 @@ export default function AuthButton() {
 
   React.useEffect(() => {
     const supabase = createClient();
+    if (!supabase) { setLoading(false); return; }
     supabase.auth.getUser().then(({ data: { user } }) => {
       setEmail(user?.email ?? null);
       setLoading(false);
@@ -27,6 +28,7 @@ export default function AuthButton() {
 
   async function handleSignOut() {
     const supabase = createClient();
+    if (!supabase) return;
     await supabase.auth.signOut();
     router.push("/");
     router.refresh();

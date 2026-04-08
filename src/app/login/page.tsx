@@ -20,6 +20,7 @@ function LoginForm() {
     setLoading(true);
 
     const supabase = createClient();
+    if (!supabase) { setError("Auth not configured"); setLoading(false); return; }
     const { error: authError } = await supabase.auth.signInWithPassword({
       email,
       password,
