@@ -205,6 +205,61 @@ const SERP_TRUST_DIMS: Record<string, { label: string; code: string }> = {
 
 type TabKey = "overview" | "local-impact" | "serp-trust" | "geo-grid" | "opportunities" | "competitors" | "keywords";
 
+// ─── Collapsible Dimension Panel ────────────────────────────────────
+function DimensionPanel({ dim, dimKey, maxPerItem }: { dim: Dimension; dimKey: string; maxPerItem: number }) {
+  const [open, setOpen] = useState(false);
+  const visibleItems = dim.items.filter((item) => item.status !== "unknown");
+  if (visibleItems.length === 0) return null;
+  return (
+    <div className="bg-navy-900 border border-navy-800 rounded-xl overflow-hidden">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className="w-full p-5 flex items-center justify-between hover:bg-navy-800/30 transition-colors"
+      >
+        <div className="flex items-center gap-4">
+          <MiniScoreRing score={dim.pct} />
+          <div className="text-left">
+            <h4 className="font-display font-bold text-white">{(LOCAL_IMPACT_DIMS[dimKey] ?? SERP_TRUST_DIMS[dimKey])?.label ?? dimKey}</h4>
+            <p className="text-xs font-mono text-navy-400 mt-0.5">{dim.score}/{dim.maxScore} points ({dim.pct}%)</p>
+          </div>
+        </div>
+        <svg className={`w-5 h-5 text-navy-400 transition-transform duration-200 ${open ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" /></svg>
+      </button>
+      {open && (
+        <div className="divide-y divide-navy-800/50 border-t border-navy-800">
+          {visibleItems.map((item) => (
+            <div key={item.id} className="px-5 py-3 flex items-start gap-3">
+              <div className="flex items-center gap-2 min-w-[140px] shrink-0">
+                <span className="text-[10px] font-mono text-navy-500 w-7">{item.id}</span>
+                <div className="flex gap-0.5">
+                  {Array.from({ length: maxPerItem }).map((_, i) => (
+                    <div
+                      key={i}
+                      className={`w-2.5 h-2.5 rounded-sm ${i < item.score
+                        ? item.score >= maxPerItem * 0.8 ? "bg-emerald-500" : item.score >= maxPerItem * 0.5 ? "bg-amber-500" : "bg-red-500"
+                        : "bg-navy-800"
+                      }`}
+                    />
+                  ))}
+                </div>
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 mb-0.5">
+                  <span className="text-sm font-display font-medium text-white">{item.name}</span>
+                  <span className={`text-[9px] font-mono px-1.5 py-0.5 rounded border ${statusBadge(item.status)}`}>{item.status}</span>
+                </div>
+                <p className="text-xs text-navy-400 leading-relaxed">{item.detail}</p>
+              </div>
+              <span className="text-sm font-mono font-bold text-navy-300 shrink-0">{item.score}/{item.maxScore}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Main Page ───────────────────────────────────────────────────────
 export default function AuditPage() {
   const [businessName, setBusinessName] = useState("");
@@ -237,6 +292,11 @@ export default function AuditPage() {
     setError(null);
     setReport(null);
     try {
+      // Normalize website URL: accept bare domains like "example.com"
+      let normalizedUrl = websiteUrl.trim();
+      if (normalizedUrl && !/^https?:\/\//i.test(normalizedUrl)) {
+        normalizedUrl = `https://${normalizedUrl}`;
+      }
       const res = await fetch("/api/audit", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -244,7 +304,7 @@ export default function AuditPage() {
           business_name: businessName,
           location: stateProvince ? `${city}, ${stateProvince}` : city,
           keyword: keyword || undefined,
-          website_url: websiteUrl || undefined,
+          website_url: normalizedUrl || undefined,
         }),
       });
       const data = await res.json();
@@ -268,48 +328,7 @@ export default function AuditPage() {
     { key: "keywords", label: "Keywords" },
   ];
 
-  // Render a framework dimension detail panel
-  function renderDimension(dim: Dimension, dimKey: string, maxPerItem: number) {
-    return (
-      <div className="bg-navy-900 border border-navy-800 rounded-xl overflow-hidden">
-        <div className="p-5 border-b border-navy-800 flex items-center justify-between">
-          <div>
-            <h4 className="font-display font-bold text-white">{(LOCAL_IMPACT_DIMS[dimKey] ?? SERP_TRUST_DIMS[dimKey])?.label ?? dimKey}</h4>
-            <p className="text-xs font-mono text-navy-400 mt-0.5">{dim.score}/{dim.maxScore} points ({dim.pct}%)</p>
-          </div>
-          <MiniScoreRing score={dim.pct} />
-        </div>
-        <div className="divide-y divide-navy-800/50">
-          {dim.items.map((item) => (
-            <div key={item.id} className="px-5 py-3 flex items-start gap-3">
-              <div className="flex items-center gap-2 min-w-[140px] shrink-0">
-                <span className="text-[10px] font-mono text-navy-500 w-7">{item.id}</span>
-                <div className="flex gap-0.5">
-                  {Array.from({ length: maxPerItem }).map((_, i) => (
-                    <div
-                      key={i}
-                      className={`w-2.5 h-2.5 rounded-sm ${i < item.score
-                        ? item.score >= maxPerItem * 0.8 ? "bg-emerald-500" : item.score >= maxPerItem * 0.5 ? "bg-amber-500" : "bg-red-500"
-                        : "bg-navy-800"
-                      }`}
-                    />
-                  ))}
-                </div>
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 mb-0.5">
-                  <span className="text-sm font-display font-medium text-white">{item.name}</span>
-                  <span className={`text-[9px] font-mono px-1.5 py-0.5 rounded border ${statusBadge(item.status)}`}>{item.status}</span>
-                </div>
-                <p className="text-xs text-navy-400 leading-relaxed">{item.detail}</p>
-              </div>
-              <span className="text-sm font-mono font-bold text-navy-300 shrink-0">{item.score}/{item.maxScore}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-    );
-  }
+  // Render is now handled by DimensionPanel component above
 
   return (
     <>
@@ -581,9 +600,9 @@ export default function AuditPage() {
 
                 {/* Show selected dimension or all */}
                 {activeDimension && report.localImpact.dimensions[activeDimension]
-                  ? renderDimension(report.localImpact.dimensions[activeDimension], activeDimension, 3)
+                  ? <DimensionPanel dim={report.localImpact.dimensions[activeDimension]} dimKey={activeDimension} maxPerItem={3} />
                   : Object.entries(report.localImpact.dimensions).map(([key, dim]) => (
-                    <div key={key}>{renderDimension(dim, key, 3)}</div>
+                    <DimensionPanel key={key} dim={dim} dimKey={key} maxPerItem={3} />
                   ))
                 }
 
@@ -630,9 +649,9 @@ export default function AuditPage() {
                 </div>
 
                 {activeDimension && report.serpTrust.dimensions[activeDimension]
-                  ? renderDimension(report.serpTrust.dimensions[activeDimension], activeDimension, 4)
+                  ? <DimensionPanel dim={report.serpTrust.dimensions[activeDimension]} dimKey={activeDimension} maxPerItem={4} />
                   : Object.entries(report.serpTrust.dimensions).map(([key, dim]) => (
-                    <div key={key}>{renderDimension(dim, key, 4)}</div>
+                    <DimensionPanel key={key} dim={dim} dimKey={key} maxPerItem={4} />
                   ))
                 }
 
@@ -708,8 +727,8 @@ export default function AuditPage() {
                   </div>
                 )}
 
-                {/* Directory Table */}
-                {report.rawDirectories && report.rawDirectories.length > 0 && (
+                {/* Directory Table — hide unknown entries */}
+                {report.rawDirectories && report.rawDirectories.filter(d => d.found !== null).length > 0 && (
                   <div className="bg-navy-900 border border-navy-800 rounded-xl overflow-hidden">
                     <div className="p-5 border-b border-navy-800">
                       <h3 className="font-display font-bold text-lg text-white">Directory Presence</h3>
@@ -719,11 +738,11 @@ export default function AuditPage() {
                         <th className="px-5 py-3">Directory</th><th className="px-5 py-3">Status</th><th className="px-5 py-3">NAP Correct</th>
                       </tr></thead>
                       <tbody className="divide-y divide-navy-800">
-                        {report.rawDirectories.map((d, i) => (
+                        {report.rawDirectories.filter(d => d.found !== null).map((d, i) => (
                           <tr key={i} className="hover:bg-navy-800/30">
                             <td className="px-5 py-3 text-sm font-display font-medium text-white">{d.name}</td>
                             <td className="px-5 py-3 text-sm font-mono">
-                              {d.found === true ? <span className="text-emerald-400">&#10003; Found</span> : d.found === false ? <span className="text-red-400">&#10007; Not Found</span> : <span className="text-navy-500">&#9888; Unknown</span>}
+                              {d.found === true ? <span className="text-emerald-400">&#10003; Found</span> : <span className="text-red-400">&#10007; Not Found</span>}
                             </td>
                             <td className="px-5 py-3 text-sm font-mono">{d.found === true ? (d.napCorrect ? <span className="text-emerald-400">&#10003;</span> : <span className="text-red-400">&#10007;</span>) : <span className="text-navy-600">&mdash;</span>}</td>
                           </tr>
