@@ -791,7 +791,7 @@ async function callClaude(systemPrompt: string, userMessage: string): Promise<an
       messages: [{ role: "user", content: userMessage }],
       system: systemPrompt,
     }),
-    signal: AbortSignal.timeout(90000),
+    signal: AbortSignal.timeout(150000),
   });
 
   if (!response.ok) {
