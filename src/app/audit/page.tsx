@@ -394,7 +394,7 @@ export default function AuditPage() {
               {loading && (
                 <span className="text-sm text-navy-400 font-mono">
                   {loadingPhase === "collecting"
-                    ? "Collecting data from 7 sources..."
+                    ? "Collecting data from 8 sources..."
                     : "AI is analyzing your business across 110 data points..."}
                 </span>
               )}

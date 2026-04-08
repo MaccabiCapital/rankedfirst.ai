@@ -327,6 +327,54 @@ interface DirectoryResult {
   name: string; url: string; found: boolean | null; napCorrect: boolean | null; claimed: boolean | null;
 }
 
+// ─── PageSpeed Insights ──────────────────────────────────────────────
+interface PSIData {
+  performanceScore: number | null;
+  lcp: number | null;
+  inp: number | null;
+  cls: number | null;
+  fcp: number | null;
+  ttfb: number | null;
+  speedIndex: number | null;
+  tbt: number | null;
+  mobileUsability: boolean;
+}
+
+async function fetchPageSpeedInsights(url: string): Promise<PSIData | null> {
+  const apiKey = process.env.GOOGLE_PSI_API_KEY;
+  if (!apiKey) { console.warn("[PSI] No API key"); return null; }
+  try {
+    const strategies = ["mobile", "desktop"] as const;
+    const results: Record<string, any> = {};
+    for (const strategy of strategies) {
+      const psiUrl = `https://www.googleapis.com/pagespeedonline/v5/runPagespeed?url=${encodeURIComponent(url)}&strategy=${strategy}&key=${apiKey}&category=performance&category=accessibility`;
+      const res = await fetch(psiUrl, { signal: AbortSignal.timeout(30000) });
+      if (res.ok) results[strategy] = await res.json();
+    }
+    const mobile = results.mobile;
+    const desktop = results.desktop;
+    const audit = (data: any, id: string) => data?.lighthouseResult?.audits?.[id];
+    const metric = (data: any, id: string) => audit(data, id)?.numericValue ?? null;
+    // Use mobile metrics primarily (Google uses mobile-first)
+    const src = mobile || desktop;
+    if (!src) return null;
+    return {
+      performanceScore: Math.round((src.lighthouseResult?.categories?.performance?.score ?? 0) * 100),
+      lcp: metric(src, "largest-contentful-paint"),
+      inp: metric(src, "experimental-interaction-to-next-paint") ?? metric(src, "interaction-to-next-paint"),
+      cls: metric(src, "cumulative-layout-shift"),
+      fcp: metric(src, "first-contentful-paint"),
+      ttfb: metric(src, "server-response-time"),
+      speedIndex: metric(src, "speed-index"),
+      tbt: metric(src, "total-blocking-time"),
+      mobileUsability: !!(mobile?.lighthouseResult?.audits?.["viewport"]?.score),
+    };
+  } catch (e) {
+    console.error("[PSI] Error:", e);
+    return null;
+  }
+}
+
 async function checkDirectories(
   businessName: string, location: string, bizAddress: string, bizPhone: string,
 ): Promise<DirectoryResult[]> {
@@ -597,7 +645,9 @@ Grades: 90-100=A+, 80-89=A, 70-79=B+, 60-69=B, 50-59=C+, 40-49=C, 30-39=D, 0-29=
 4. The executive summary should be 3-4 sentences covering the most critical findings.
 5. Competitor analysis should compare the business against the top 3 competitors from the data.
 6. For keyword insights, combine organic ranking data with GBP category data.
-7. Respond with ONLY valid JSON — no markdown, no explanation, no text outside the JSON.`;
+7. Respond with ONLY valid JSON — no markdown, no explanation, no text outside the JSON.
+8. IMPORTANT: Score items based on ALL available data. For example, if Google Maps shows review count and rating, use that to score Review Volume and Average Rating (not "absent"). If PageSpeed Insights data is provided, use it for Core Web Vitals items. Only use status "absent" when NO relevant data exists at all.
+9. Use data creatively: website word count can inform Local Content items. Directory presence can inform Citation items. Schema data can inform Technical items. GA4 presence informs Tracking. Don't default to "absent" — make a best judgment from the data available.`;
 }
 
 // ─── Build Claude User Message ──────────────────────────────────────
@@ -613,6 +663,7 @@ function buildUserMessage(
   directories: DirectoryResult[],
   indexedPages: number | null,
   competitorKeywordSets: Array<{ name: string; domain: string; keywords: any[] }>,
+  psiData: PSIData | null,
 ): string {
   const city = request.location.split(",")[0]?.trim() ?? request.location;
   const kw = request.keyword || request.business_name;
@@ -642,6 +693,18 @@ function buildUserMessage(
     lines.push(`- Hours: ${hasHours ? "present" : "missing"}`);
     const desc = biz.description ?? "";
     lines.push(`- Description: ${desc ? `present (${desc.length} chars)` : "missing"}`);
+    lines.push(`- Website URL on GBP: ${biz.domain ?? biz.url ?? "none"}`);
+    lines.push(`- Place ID: ${biz.place_id ?? "N/A"}`);
+    // Review snippets if available
+    const reviewSnippets = biz.reviews ?? biz.people_also_search ?? [];
+    if (Array.isArray(reviewSnippets) && reviewSnippets.length > 0) {
+      lines.push(`- Sample reviews: ${reviewSnippets.length} available`);
+      for (const rev of reviewSnippets.slice(0, 3)) {
+        if (rev.review_text || rev.snippet) {
+          lines.push(`  - "${(rev.review_text || rev.snippet || "").slice(0, 150)}" (${rev.rating ?? "?"} stars)`);
+        }
+      }
+    }
   } else {
     lines.push("- Found: false (business not found in Google Maps)");
   }
@@ -688,6 +751,20 @@ function buildUserMessage(
     lines.push(`- Images with alt: ${website.imagesWithAlt}, without: ${website.imagesWithoutAlt}`);
     lines.push(`- Title tag: "${website.titleTag}"`);
     lines.push(`- Meta description: "${website.metaDescription.slice(0, 200)}"`);
+    lines.push("");
+  }
+
+  if (psiData) {
+    lines.push("## PageSpeed Insights (Mobile)");
+    lines.push(`- Performance Score: ${psiData.performanceScore}/100`);
+    lines.push(`- Largest Contentful Paint (LCP): ${psiData.lcp !== null ? `${(psiData.lcp / 1000).toFixed(2)}s` : "N/A"}`);
+    lines.push(`- Interaction to Next Paint (INP): ${psiData.inp !== null ? `${psiData.inp}ms` : "N/A"}`);
+    lines.push(`- Cumulative Layout Shift (CLS): ${psiData.cls !== null ? psiData.cls.toFixed(3) : "N/A"}`);
+    lines.push(`- First Contentful Paint (FCP): ${psiData.fcp !== null ? `${(psiData.fcp / 1000).toFixed(2)}s` : "N/A"}`);
+    lines.push(`- Time to First Byte (TTFB): ${psiData.ttfb !== null ? `${psiData.ttfb}ms` : "N/A"}`);
+    lines.push(`- Speed Index: ${psiData.speedIndex !== null ? `${(psiData.speedIndex / 1000).toFixed(2)}s` : "N/A"}`);
+    lines.push(`- Total Blocking Time (TBT): ${psiData.tbt !== null ? `${psiData.tbt}ms` : "N/A"}`);
+    lines.push(`- Mobile Usability: ${psiData.mobileUsability ? "pass" : "fail"}`);
     lines.push("");
   }
 
@@ -887,9 +964,11 @@ export async function POST(request: NextRequest) {
       fullUrl ? analyzeWebsite(fullUrl, "", "").catch(() => null) : Promise.resolve(null),
       // 5. Indexed pages (site: query, if website)
       domain ? fetchIndexedPages(domain, mapsLocationParam).catch(() => null) : Promise.resolve(null),
+      // 6. PageSpeed Insights (if website)
+      fullUrl ? fetchPageSpeedInsights(fullUrl).catch(() => null) : Promise.resolve(null),
     ];
 
-    const [mapsNameData, mapsKwData, rankedKwData, websiteData, indexedPages] = await Promise.all(wave1);
+    const [mapsNameData, mapsKwData, rankedKwData, websiteData, indexedPages, psiData] = await Promise.all(wave1);
 
     // Find business in Maps results
     const mapsNameItems = dfsItems(mapsNameData);
@@ -1005,6 +1084,7 @@ export async function POST(request: NextRequest) {
       directories,
       indexedPages,
       competitorKeywordSets,
+      psiData as PSIData | null,
     );
 
     const claudeReport = await callClaude(systemPrompt, userMessage);
@@ -1022,6 +1102,8 @@ export async function POST(request: NextRequest) {
         rawTechnical: websiteAnalysis,
         // Attach raw keywords for the table
         rawKeywords: ownKeywords,
+        // Attach raw PSI data
+        rawPSI: psiData,
         rawKeywordsTotal: ownKeywordsTotal,
         rawETV: ownETV,
         // Meta
