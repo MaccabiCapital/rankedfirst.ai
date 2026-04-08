@@ -83,6 +83,33 @@ const LOCATION_CACHE: Record<string, number> = {
   "sydney,new south wales":9069243,"melbourne,victoria":9068949,
 };
 
+// DataForSEO Labs endpoints need country-level codes, not city-level
+const COUNTRY_CODE_MAP: Record<string, number> = {
+  // Canadian provinces
+  "ontario": 2124, "on": 2124, "quebec": 2124, "qc": 2124, "british columbia": 2124, "bc": 2124,
+  "alberta": 2124, "ab": 2124, "manitoba": 2124, "mb": 2124, "saskatchewan": 2124, "sk": 2124,
+  "nova scotia": 2124, "ns": 2124, "new brunswick": 2124, "nb": 2124,
+  // US states (sample — defaults to 2840)
+  "ny": 2840, "new york": 2840, "ca": 2840, "california": 2840, "tx": 2840, "texas": 2840,
+  "fl": 2840, "florida": 2840, "il": 2840, "illinois": 2840, "az": 2840, "arizona": 2840,
+  "co": 2840, "colorado": 2840, "wa": 2840, "washington": 2840, "ma": 2840, "massachusetts": 2840,
+  "ga": 2840, "georgia": 2840, "nv": 2840, "nevada": 2840, "or": 2840, "oregon": 2840,
+  "mi": 2840, "michigan": 2840, "mn": 2840, "minnesota": 2840, "tn": 2840, "tennessee": 2840,
+  "nc": 2840, "north carolina": 2840, "pa": 2840, "pennsylvania": 2840, "oh": 2840, "ohio": 2840,
+  // UK
+  "england": 2826, "uk": 2826, "united kingdom": 2826,
+  // Australia
+  "new south wales": 2036, "victoria": 2036, "queensland": 2036, "australia": 2036,
+};
+
+function resolveCountryCode(location: string): number {
+  const parts = location.toLowerCase().split(",").map(p => p.trim());
+  for (let i = parts.length - 1; i >= 0; i--) {
+    if (COUNTRY_CODE_MAP[parts[i]]) return COUNTRY_CODE_MAP[parts[i]];
+  }
+  return 2840; // default US
+}
+
 function resolveLocation(location: string): { code: number | null; name: string } {
   const normalized = location.toLowerCase().replace(/\s+/g, " ").trim();
   const key = normalized.replace(/\s*,\s*/g, ",");
@@ -344,20 +371,26 @@ async function fetchPageSpeedInsights(url: string): Promise<PSIData | null> {
   const apiKey = process.env.GOOGLE_PSI_API_KEY;
   if (!apiKey) { console.warn("[PSI] No API key"); return null; }
   try {
-    const strategies = ["mobile", "desktop"] as const;
-    const results: Record<string, any> = {};
-    for (const strategy of strategies) {
-      const psiUrl = `https://www.googleapis.com/pagespeedonline/v5/runPagespeed?url=${encodeURIComponent(url)}&strategy=${strategy}&key=${apiKey}&category=performance&category=accessibility`;
-      const res = await fetch(psiUrl, { signal: AbortSignal.timeout(30000) });
-      if (res.ok) results[strategy] = await res.json();
+    // Run mobile and desktop in parallel
+    const [mobileRes, desktopRes] = await Promise.allSettled([
+      fetch(`https://www.googleapis.com/pagespeedonline/v5/runPagespeed?url=${encodeURIComponent(url)}&strategy=mobile&key=${apiKey}&category=performance`, { signal: AbortSignal.timeout(45000) }),
+      fetch(`https://www.googleapis.com/pagespeedonline/v5/runPagespeed?url=${encodeURIComponent(url)}&strategy=desktop&key=${apiKey}&category=performance`, { signal: AbortSignal.timeout(45000) }),
+    ]);
+    const mobile = mobileRes.status === "fulfilled" && mobileRes.value.ok ? await mobileRes.value.json() : null;
+    const desktop = desktopRes.status === "fulfilled" && desktopRes.value.ok ? await desktopRes.value.json() : null;
+    if (!mobile && !desktop) {
+      // Log why it failed
+      if (mobileRes.status === "fulfilled" && !mobileRes.value.ok) {
+        console.error("[PSI] Mobile error:", mobileRes.value.status, await mobileRes.value.text().catch(() => ""));
+      }
+      if (mobileRes.status === "rejected") console.error("[PSI] Mobile rejected:", mobileRes.reason?.message);
+      return null;
     }
-    const mobile = results.mobile;
-    const desktop = results.desktop;
     const audit = (data: any, id: string) => data?.lighthouseResult?.audits?.[id];
     const metric = (data: any, id: string) => audit(data, id)?.numericValue ?? null;
     // Use mobile metrics primarily (Google uses mobile-first)
     const src = mobile || desktop;
-    if (!src) return null;
+    console.log(`[PSI] Got data — mobile: ${!!mobile}, desktop: ${!!desktop}, perf score: ${Math.round((src.lighthouseResult?.categories?.performance?.score ?? 0) * 100)}`);
     return {
       performanceScore: Math.round((src.lighthouseResult?.categories?.performance?.score ?? 0) * 100),
       lcp: metric(src, "largest-contentful-paint"),
@@ -370,7 +403,7 @@ async function fetchPageSpeedInsights(url: string): Promise<PSIData | null> {
       mobileUsability: !!(mobile?.lighthouseResult?.audits?.["viewport"]?.score),
     };
   } catch (e) {
-    console.error("[PSI] Error:", e);
+    console.error("[PSI] Error:", e instanceof Error ? e.message : e);
     return null;
   }
 }
@@ -938,6 +971,8 @@ export async function POST(request: NextRequest) {
     console.log(`[audit] Resolved location: ${loc.name} (code: ${loc.code})`);
     const mapsLocationParam = loc.code ? { location_code: loc.code } : { location_name: loc.name };
     const locationCode = loc.code ?? 2840;
+    // Labs API needs country-level codes, not city-level
+    const labsLocationCode = resolveCountryCode(location);
 
     // ─── Phase 1: Data Collection (all parallel) ────────────────────
     const domain = website_url ? website_url.replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/\/.*$/, "") : null;
@@ -956,7 +991,7 @@ export async function POST(request: NextRequest) {
       // 3. Ranked Keywords (if website)
       domain
         ? safeDFS("/dataforseo_labs/google/ranked_keywords/live", [{
-            target: domain, location_code: locationCode, language_code: "en",
+            target: domain, location_code: labsLocationCode, language_code: "en",
             limit: 50, order_by: ["ranked_serp_element.serp_item.rank_group,asc"],
           }])
         : Promise.resolve(null),
@@ -1047,7 +1082,7 @@ export async function POST(request: NextRequest) {
     if (competitorDomains.length > 0) {
       const compResults = await Promise.all(
         competitorDomains.map(async (cd) => {
-          const kws = await fetchCompetitorKeywords(cd.domain, locationCode).catch(() => []);
+          const kws = await fetchCompetitorKeywords(cd.domain, labsLocationCode).catch(() => []);
           return { ...cd, keywords: kws };
         })
       );
